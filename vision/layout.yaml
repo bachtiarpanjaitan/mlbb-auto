@@ -1,0 +1,86 @@
+video:
+  name: Mobile Legends Replay
+  width: 2400
+  height: 1080
+  fps: 30
+  aspect_ratio: '20:9'
+hero_panel:
+  description: Panel info hero terpilih — portrait, text, HP bar, skill, item
+  bbox:
+  - 665
+  - 770
+  - 1060
+  - 160
+  type: composite
+  portrait:
+    description: Icon wajah hero terpilih
+    bbox:
+    - 700
+    - 780
+    - 110
+    - 100
+    type: template
+    templates: heroes
+  level:
+    description: Level hero saat ini (angka)
+    bbox:
+    - 840
+    - 780
+    - 40
+    - 40
+    type: ocr
+    hint: number
+  hp_bar:
+    description: HP bar — green bar di kanan text
+    bbox:
+    - 880
+    - 790
+    - 400
+    - 20
+    type: bar
+    color: green
+  mana_bar:
+    description: Mana/Energy bar
+    bbox:
+    - 1125
+    - 425
+    - 185
+    - 12
+    type: bar
+    color: blue
+  skills:
+    description: Skill hero — 5 slot berjajar
+    bbox:
+    - 690
+    - 965
+    - 485
+    - 85
+    type: composite
+    skill_1:
+      bbox:
+      - 840
+      - 835
+      - 82
+      - 82
+      type: template
+    skill_2:
+      bbox:
+      - 947
+      - 835
+      - 82
+      - 82
+      type: template
+    skill_3:
+      bbox:
+      - 1054
+      - 835
+      - 82
+      - 82
+      type: template
+    battle_spell:
+      bbox:
+      - 1205
+      - 850
+      - 59
+      - 59
+      type: template
