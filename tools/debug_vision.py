@@ -4,7 +4,7 @@ Tampilkan grid, region hero_panel, dan status deteksi hero di overlay kiri.
 """
 
 from __future__ import annotations
-import sys, os, argparse, logging
+import sys, os, argparse, logging, yaml
 from typing import Any
 import cv2
 import numpy as np
@@ -361,11 +361,14 @@ def draw_region_boxes(frame: np.ndarray):
         bx, by, bw, bh = reg["bbox"]
         name = path.split(".")[-1]
 
-        if ".skills." in path:
+        if ".skills." in path or ".items." in path:
             cx, cy = bx + bw // 2, by + bh // 2
             r = max(bw, bh) // 2
             cv2.circle(frame, (cx, cy), r, (0, 200, 200), 2)
-            if name != "battle_spell":
+            if ".skills." in path and name != "battle_spell":
+                cv2.putText(frame, name, (cx - 12, cy + 4),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 200, 200), 1)
+            elif ".items." in path:
                 cv2.putText(frame, name, (cx - 12, cy + 4),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 200, 200), 1)
         else:
@@ -447,6 +450,229 @@ def draw_status_overlay(frame: np.ndarray, status: dict[str, Any]):
         y_pos += line_h
 
 
+# ── Help Overlay ───────────────────────────────────────────────────────
+_HELP_LINES = [
+    ("── Controls ──", (200, 200, 255)),
+    ("Space", "Pause / resume"),
+    ("E", "Toggle layout editor"),
+    ("S / Shift+S", "Save layout / Screenshot"),
+    ("G", "Toggle grid"),
+    ("O", "Toggle status overlay"),
+    ("H", "Toggle this help"),
+    ("L", "Reload layout.yaml"),
+    ("R", "Restart video"),
+    ("D", "Re-detect (paused)"),
+    ("Z", "Debug region sizes"),
+    ("Drag handles", "Move / resize regions"),
+]
+
+def draw_help_overlay(frame: np.ndarray):
+    """Draw key binding help at bottom of frame."""
+    h, w = frame.shape[:2]
+    line_h = 20
+    pad = 8
+    total_h = len(_HELP_LINES) * line_h + pad * 2
+    x = 10
+    y = h - total_h - 10
+
+    # Background
+    overlay = frame.copy()
+    cv2.rectangle(overlay, (x, y), (x + 350, y + total_h), (20, 20, 30), -1)
+    cv2.addWeighted(overlay, 0.88, frame, 0.12, 0, frame)
+    cv2.rectangle(frame, (x, y), (x + 350, y + total_h), (80, 80, 120), 1)
+
+    # Text
+    yy = y + pad + line_h - 5
+    for line in _HELP_LINES:
+        if isinstance(line, tuple):
+            if len(line) == 2 and isinstance(line[0], str) and isinstance(line[1], tuple):
+                text, color = line
+                cv2.putText(frame, text, (x + pad, yy), cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1, cv2.LINE_AA)
+            else:
+                key, desc = line
+                cv2.putText(frame, f"  {key}:", (x + pad, yy), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 200, 200), 1)
+                tw = cv2.getTextSize(f"  {key}:", cv2.FONT_HERSHEY_SIMPLEX, 0.4, 1)[0][0]
+                cv2.putText(frame, desc, (x + pad + tw + 4, yy), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (200, 200, 200), 1)
+        yy += line_h
+
+
+# ── Layout Editor (drag / resize region boxes) ────────────────────────
+
+class _LayoutEditor:
+    """Interactive layout region editor — drag, resize, save."""
+    def __init__(self):
+        self.selected: str | None = None      # region path, e.g. "hero_panel.skills.skill_1"
+        self.mode: str | int | None = None    # 'move' or corner index (0-3)
+        self.orig_bbox: list[int] | None = None
+        self.offset: tuple[int, int] | None = None  # mouse offset inside bbox for move
+        self.dirty: bool = False
+        self.paused: bool = False  # edit hanya saat paused
+        self.edit_mode: bool = False  # toggle dengan E
+
+    def get_region_data(self, path: str) -> dict | None:
+        """Get region dict from cached layout by dot-path."""
+        data = layout._LAYOUT_CACHE.get(layout._LAYOUT_PATH)
+        if data is None:
+            data = layout.load()
+        parts = path.split(".")
+        for p in parts:
+            if isinstance(data, dict) and p in data:
+                data = data[p]
+            else:
+                return None
+        return data if isinstance(data, dict) else None
+
+    def draw(self, frame: np.ndarray):
+        """Draw selection highlight + resize handles."""
+        if self.selected is None:
+            return
+        reg = self.get_region_data(self.selected)
+        if reg is None or "bbox" not in reg:
+            return
+        bx, by, bw, bh = reg["bbox"]
+        # Highlight with thick orange border
+        cv2.rectangle(frame, (bx, by), (bx + bw, by + bh), (0, 165, 255), 3)
+        # Resize handles at corners
+        handles = [(bx, by), (bx + bw, by), (bx + bw, by + bh), (bx, by + bh)]
+        for hx, hy in handles:
+            cv2.circle(frame, (hx, hy), 12, (0, 255, 255), -1)
+            cv2.circle(frame, (hx, hy), 12, (0, 165, 255), 3)
+        # Label
+        name = self.selected.split(".")[-1]
+        cv2.putText(frame, f"EDIT: {name} [{bx},{by},{bw},{bh}]",
+                    (bx, by - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
+
+
+def _make_mouse_cb(editor: _LayoutEditor, fw: int, fh: int, dw: int, dh: int):
+    """Create mouse callback for layout editing."""
+    def _cb(event, x, y, flags, param):
+        # Convert display coords → frame coords
+        fx = int(x * fw / dw) if dw > 0 else x
+        fy = int(y * fh / dh) if dh > 0 else y
+        fx = max(0, min(fx, fw - 1))
+        fy = max(0, min(fy, fh - 1))
+
+        e = param  # _LayoutEditor instance
+
+        if not e.paused or not e.edit_mode:
+            return
+
+        if event == cv2.EVENT_LBUTTONDOWN:
+            # Coba drag region yang sedang terpilih (kalo klik di dalamnya)
+            if e.selected is not None:
+                reg = e.get_region_data(e.selected)
+                if reg and "bbox" in reg:
+                    bx, by, bw, bh = reg["bbox"]
+                    on_handle = any(
+                        abs(fx - cx) < 14 and abs(fy - cy) < 14
+                        for cx, cy in [(bx, by), (bx + bw, by), (bx + bw, by + bh), (bx, by + bh)]
+                    )
+                    if bx <= fx <= bx + bw and by <= fy <= by + bh:
+                        if on_handle:
+                            ci = next(i for i, (cx, cy) in
+                                      enumerate([(bx, by), (bx + bw, by), (bx + bw, by + bh), (bx, by + bh)])
+                                      if abs(fx - cx) < 14 and abs(fy - cy) < 14)
+                            e.mode = ci
+                        else:
+                            e.mode = "move"
+                        e.orig_bbox = list(reg["bbox"])
+                        e.offset = (fx - bx, fy - by)
+                        return
+            # Cari region terdalam di bawah klik
+            best: tuple[str, dict] | None = None
+            for path, reg in reversed(list(layout.enumerate_regions())):
+                if "bbox" not in reg:
+                    continue
+                bx, by, bw, bh = reg["bbox"]
+                if not (bx <= fx <= bx + bw and by <= fy <= by + bh):
+                    continue
+                # Region ini cocok — pilih yang terdalam (nested dots count)
+                if best is None or path.count(".") > best[0].count("."):
+                    best = (path, reg)
+            if best is not None:
+                path, reg = best
+                # Cek apakah kena handle corner
+                bx, by, bw, bh = reg["bbox"]
+                corners = [(bx, by), (bx + bw, by), (bx + bw, by + bh), (bx, by + bh)]
+                for ci, (cx, cy) in enumerate(corners):
+                    if abs(fx - cx) < 14 and abs(fy - cy) < 14:
+                        e.selected = path
+                        e.mode = ci
+                        e.orig_bbox = list(reg["bbox"])
+                        e.offset = None
+                        return
+                # Drag body
+                e.selected = path
+                e.mode = "move"
+                e.orig_bbox = list(reg["bbox"])
+                e.offset = (fx - bx, fy - by)
+                return
+            # Klik di luar semua region → deselect
+            e.selected = None
+            e.mode = None
+
+        elif event == cv2.EVENT_MOUSEMOVE and e.mode is not None and e.selected:
+            reg = e.get_region_data(e.selected)
+            if reg is None:
+                return
+            if e.mode == "move":
+                dx = fx - e.orig_bbox[0] - e.offset[0]
+                dy = fy - e.orig_bbox[1] - e.offset[1]
+                reg["bbox"] = [e.orig_bbox[0] + dx, e.orig_bbox[1] + dy,
+                               e.orig_bbox[2], e.orig_bbox[3]]
+            else:
+                # Corner resize — hanya 1 corner yg bergerak
+                ox, oy, ow, oh = e.orig_bbox
+                r, b = ox + ow, oy + oh  # right, bottom
+                if e.mode == 0:      # TL
+                    x, y = fx, fy
+                    w, h = r - fx, b - fy
+                elif e.mode == 1:    # TR
+                    x, y = ox, fy
+                    w, h = fx - ox, b - fy
+                elif e.mode == 2:    # BR
+                    x, y = ox, oy
+                    w, h = fx - ox, fy - oy
+                else:                # BL (mode 3)
+                    x, y = fx, oy
+                    w, h = r - fx, fy - oy
+                if w < 5:
+                    w, x = 5, x if e.mode in (0, 3) else r - 5
+                if h < 5:
+                    h, y = 5, y if e.mode in (0, 1) else b - 5
+                reg["bbox"] = [int(x), int(y), int(w), int(h)]
+            e.dirty = True
+
+        elif event == cv2.EVENT_LBUTTONUP:
+            if e.selected:
+                reg = e.get_region_data(e.selected)
+                if reg and "bbox" in reg:
+                    bb = reg["bbox"]
+                    if bb[2] < 5:
+                        bb[2] = 5
+                    if bb[3] < 5:
+                        bb[3] = 5
+            e.mode = None
+
+    return _cb
+
+
+def _save_layout(editor: _LayoutEditor):
+    """Save cached layout back to layout.yaml."""
+    if not editor.dirty:
+        print("ℹ️ No changes to save")
+        return
+    path = layout._LAYOUT_PATH
+    data = layout._LAYOUT_CACHE.get(path)
+    if data is None:
+        print("❌ Layout cache empty")
+        return
+    with open(path, "w") as f:
+        yaml.dump(data, f, default_flow_style=None, sort_keys=False, allow_unicode=True)
+    print(f"💾 Layout saved to {path}")
+    editor.dirty = False
+
+
 # ── Main ──────────────────────────────────────────────────────────────
 
 def main():
@@ -484,13 +710,23 @@ def main():
 
     paused = False
     show_overlay = a.overlay
-    show_grid = True
+    show_grid = False
+    show_help = False
 
     cv2.namedWindow("MLBB Debug", cv2.WINDOW_NORMAL)
     cv2.resizeWindow("MLBB Debug", dw, dh)
 
-    detect_every = 10  # proses deteksi tiap N frame (ringankan beban OCR)
+    # ── Layout Editor ──
+    layout_editor = _LayoutEditor()
+    fw = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    fh = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    cv2.setMouseCallback("MLBB Debug", _make_mouse_cb(layout_editor, fw, fh, dw, dh), layout_editor)
+    layout_edit_mode = False  # editor mati default, tekan E untuk aktifkan
+
+    detect_every = 10
     frame_count = 0
+
+    clean_frame = None  # snapshot saat pause
 
     while True:
         if not paused:
@@ -499,7 +735,7 @@ def main():
                 cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                 continue
 
-        # ── Detection ── (langsung, tanpa thread — PaddleOCR sudah dihapus)
+        # ── Detection ──
         if not paused:
             frame_count += 1
             video_time = frame_count / fps
@@ -507,16 +743,24 @@ def main():
                 status = detector_mgr.detect(fr, video_time)
                 detector_mgr.latest_status = status
 
-        # ── Drawing ── (langsung di fr, cap.read() akan overwrite)
-        if show_grid:
-            draw_grid(fr)
-        draw_region_boxes(fr)
-        if show_overlay:
-            draw_status_overlay(fr, status)
-        if a.resize < 1:
-            vis = cv2.resize(fr, (dw, dh))
+        # ── Drawing ── (pakai copy biar ga numpuk kalau paused)
+        if paused and clean_frame is not None:
+            draw_base = clean_frame.copy()
         else:
-            vis = fr
+            draw_base = fr.copy()
+        if show_grid:
+            draw_grid(draw_base)
+        draw_region_boxes(draw_base)
+        if layout_edit_mode:
+            layout_editor.draw(draw_base)
+        if show_help:
+            draw_help_overlay(draw_base)
+        if show_overlay:
+            draw_status_overlay(draw_base, status)
+        if a.resize < 1:
+            vis = cv2.resize(draw_base, (dw, dh))
+        else:
+            vis = draw_base
         cv2.imshow("MLBB Debug", vis)
 
         # ── Controls ──
@@ -525,8 +769,14 @@ def main():
             break
         if k == ord(" "):
             paused ^= True
+            layout_editor.paused = paused
             if paused:
-                print("⏸ Paused — running detection on current frame")
+                clean_frame = fr.copy()
+                print("⏸ Paused")
+            else:
+                layout_editor.selected = None
+                layout_editor.mode = None
+                print("▶ Resumed")
                 status = detector_mgr.detect(fr, frame_count / fps)
         if k == ord("r"):
             cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
@@ -550,10 +800,25 @@ def main():
             layout._LAYOUT_CACHE.clear()
             print("🔄 Layout reloaded!")
         if k == ord("s"):
+            _save_layout(layout_editor)
+        if k == ord("S"):  # Shift+S = screenshot
             ts = cv2.getTickCount()
             path = os.path.join(BASE, f"debug_frame_{ts}.png")
             cv2.imwrite(path, vis)
             print(f"📸 Frame saved: {path}")
+        if k == ord("e"):
+            layout_edit_mode ^= True
+            layout_editor.edit_mode = layout_edit_mode
+            if not layout_edit_mode:
+                layout_editor.selected = None
+                layout_editor.mode = None
+                print("Layout editor: OFF")
+            else:
+                print("Layout editor: ON — pause video, lalu klik region")
+            print(f"Layout editor: {'ON' if layout_edit_mode else 'OFF'}")
+        if k == ord("h"):
+            show_help ^= True
+            print(f"Help: {'ON' if show_help else 'OFF'}")
         if k == ord("z"):
             # Debug: print crop results for all regions
             for path, reg in layout.enumerate_regions():
