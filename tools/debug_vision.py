@@ -199,13 +199,13 @@ class DetectorManager:
         if skills_status:
             status["skills"] = skills_status
 
-        # ── Items (template matching) ──
+        # ── Items (template matching + CDR) ──
         if self._item_matcher is not None:
             item_names: list[str] = []
+            total_cdr = 0
             for item_slot in ("item_1", "item_2", "item_3", "item_4", "item_5", "item_6"):
                 item_img = crop_region(frame, "hero_panel", "items", item_slot)
                 if item_img is not None and item_img.size:
-                    # Skip slot kosong (gelap, std rendah)
                     gray = cv2.cvtColor(item_img, cv2.COLOR_BGR2GRAY)
                     if gray.mean() < 30 or gray.std() < 28:
                         continue
@@ -214,13 +214,16 @@ class DetectorManager:
                         entry = self._item_db.get(match.label)
                         if entry:
                             name = entry.get("name", match.label)
+                            total_cdr += entry.get("attributes", {}).get("cooldown_reduction", 0)
                         else:
                             name = match.label.replace("_", " ").title()
                         item_names.append(name)
                         log.debug("Item %s: %s (%.0f%%)", item_slot, name, match.confidence * 100)
             if item_names:
                 status["items"] = item_names
-                log.debug("Items: %s", ", ".join(item_names))
+                # Cap CDR at 40% (MLBB max dari item)
+                self._cdr = min(total_cdr / 100.0, 0.40)
+                log.debug("Items: %s | CDR: %.0f%%", ", ".join(item_names), total_cdr)
 
         return status
 
