@@ -16,7 +16,7 @@ _LAYOUT_PATH = os.path.join(os.path.dirname(__file__), "..", "layout.yaml")
 # Scale factor for input frame downscaling.
 # When set to < 1.0, all bbox coordinates returned by get_region()
 # are proportionally scaled.
-_SCALE: float = 1.0
+_SCALE: float = 0.5
 
 
 def set_scale(s: float):
