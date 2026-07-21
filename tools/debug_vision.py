@@ -99,6 +99,31 @@ class DetectorManager:
         if item_templates:
             self._item_matcher = TemplateMatcher(threshold=0.25, templates=item_templates)
 
+        # ── Load battle spell templates (resize ke 59x59 = ukuran battle_spell slot) ──
+        self._spell_matcher = None
+        spell_templates: dict[str, np.ndarray] = {}
+        spells_path = os.path.join(base, "assets", "spells")
+        try:
+            for fname in sorted(os.listdir(spells_path)):
+                if fname.endswith(".png"):
+                    stem = fname[:-4]
+                    # Skip recall — bukan battle spell
+                    if stem == "recall":
+                        continue
+                    img = cv2.imread(os.path.join(spells_path, fname))
+                    if img is not None:
+                        img = cv2.resize(img, (59, 59), interpolation=cv2.INTER_AREA)
+                        spell_templates[stem] = img
+            log.info("Loaded %d spell templates (59x59)", len(spell_templates))
+        except Exception as e:
+            log.warning("Failed to load spell templates: %s", e)
+        if spell_templates:
+            self._spell_matcher = TemplateMatcher(threshold=0.35, templates=spell_templates)
+
+        # ── Cached identified battle spell ──
+        self._cached_spell_key: str | None = None
+        self._cached_spell_cd: float | None = None
+
         log.info("Detectors initialized")
 
         # ── Cooldown tracker ──
@@ -117,16 +142,38 @@ class DetectorManager:
         # ── Reference image CD detection ──
         self._cd_ref_images: dict[str, np.ndarray] = {}
         self._cd_ref_captured: bool = False
+        # Minimum mean brightness sebelum ref di-capture (skill confirmed ready)
+        self._cd_ref_ready_threshold: float = 100.0
+        # Jumlah frame berurutan untuk konfirmasi perubahan status
+        self._cd_confirm_frames: int = 3
+        self._cd_cooldown_count: dict[str, int] = {}
+        self._cd_ready_count: dict[str, int] = {}
 
     def capture_skill_references(self, frame: np.ndarray):
-        if self._cd_ref_captured:
-            return
+        """
+        Capture reference images untuk tiap skill — hanya saat brightness
+        mengindikasikan skill dalam kondisi ready (tidak cooldown).
+        Dipanggil tiap siklus deteksi sampai semua skill tercapture.
+        """
+        all_captured = True
         for skill_name in ("passive", "skill_1", "skill_2", "skill_3", "battle_spell"):
+            if skill_name in self._cd_ref_images:
+                continue  # already captured
+            all_captured = False
             img = crop_region(frame, "hero_panel", "skills", skill_name)
-            if img is not None and img.size:
-                self._cd_ref_images[skill_name] = img.copy()
-        self._cd_ref_captured = True
-        log.info("Skill references captured: %d skills", len(self._cd_ref_images))
+            if img is None or not img.size:
+                continue
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            mean_brightness = gray.mean()
+            # Hanya capture jika brightness cukup tinggi (skill confirmed ready)
+            if mean_brightness < self._cd_ref_ready_threshold:
+                continue
+            self._cd_ref_images[skill_name] = img.copy()
+            self._cd_ref_brightness[skill_name] = float(mean_brightness)
+            log.info("Reference captured for %s (brightness=%.1f)", skill_name, mean_brightness)
+        if all_captured and not self._cd_ref_captured:
+            self._cd_ref_captured = True
+            log.info("All skill references captured (%d skills)", len(self._cd_ref_images))
 
     def detect(self, frame: np.ndarray, video_time: float = 0) -> dict[str, Any]:
         """Run all detectors on a frame and return status dict."""
@@ -219,6 +266,22 @@ class DetectorManager:
                 # Update cooldown: visual check (deteksi gelap) + timer kalkulasi
                 self._update_skill_cooldown(skill_name, skill_img, skill_info, video_time)
 
+                # ── Battle spell identification (template matching) ──
+                if skill_name == "battle_spell" and self._spell_matcher is not None:
+                    if self._cached_spell_key is None:
+                        gray = cv2.cvtColor(skill_img, cv2.COLOR_BGR2GRAY)
+                        if gray.mean() > 30:  # skip if completely dark
+                            match = self._spell_matcher.match(skill_img)
+                            if match and match.success and match.label:
+                                self._cached_spell_key = match.label
+                                cd = self._BATTLE_SPELL_CDS.get(match.label)
+                                if cd:
+                                    self._cached_spell_cd = float(cd)
+                                log.info("Battle spell identified: %s (CD=%ss, conf=%.0f%%)",
+                                         match.label, cd or "?", match.confidence * 100)
+                    if self._cached_spell_key:
+                        skill_info["spell_name"] = self._cached_spell_key
+
                 skills_status[skill_name] = skill_info
         if skills_status:
             status["skills"] = skills_status
@@ -263,67 +326,87 @@ class DetectorManager:
     }
 
     def _check_cooldown_visual(self, skill_name: str, skill_img: np.ndarray) -> bool:
-        """Deteksi cooldown: bandingkan brightness vs peak brightness."""
+        """
+        Deteksi cooldown: bandingkan gambar asli (ref) dengan yg skrg.
+
+        - Ada reference: cv2.matchTemplate (TM_CCOEFF_NORMED, tanpa normalisasi).
+          Korelasi rendah (< 0.90) = gambar berbeda = CD.
+        - Tidak ada reference: brightness ratio vs peak.
+        """
+        ref = self._cd_ref_images.get(skill_name)
+        if ref is not None:
+            h, w = ref.shape[:2]
+            current = cv2.resize(skill_img, (w, h)) if skill_img.shape[:2] != (h, w) else skill_img
+            ref_g = cv2.cvtColor(ref, cv2.COLOR_BGR2GRAY) if ref.ndim == 3 else ref
+            cur_g = cv2.cvtColor(current, cv2.COLOR_BGR2GRAY) if current.ndim == 3 else current
+
+            # Crop center aja — buang 30% tiap sisi, ambil 40% tengah
+            margin_x, margin_y = int(w * 0.30), int(h * 0.30)
+            ref_center = ref_g[margin_y:h-margin_y, margin_x:w-margin_x]
+            cur_center = cur_g[margin_y:h-margin_y, margin_x:w-margin_x]
+
+            corr = float(cv2.matchTemplate(ref_center, cur_center, cv2.TM_CCOEFF_NORMED)[0][0])
+            return corr < 0.90
+
+        # Fallback: brightness ratio vs peak
         gray = cv2.cvtColor(skill_img, cv2.COLOR_BGR2GRAY)
         current = gray.mean()
         peak = self._cd_ref_brightness.get(skill_name)
 
-        # Track peak brightness (reference = kondisi paling terang)
         if peak is None or current > peak:
             self._cd_ref_brightness[skill_name] = current
             peak = current
 
-        # Peak terlalu gelap → belum pernah lihat icon terang
-        # Fallback: absolute threshold
         if peak < 90:
             return current < 70
-
-        # Peak rendah (<120) → icon naturally agak gelap
         if peak < 120:
-            return current / peak < 0.55  # butuh perubahan lebih ekstrem
-
-        # Peak normal (>120) → ratio-based detection
+            return current / peak < 0.55
         if current / peak > 0.80:
-            return False  # kembali ke brightness normal → ready
-        return current / peak < 0.70  # lebih gelap dari 70% peak → cooldown
+            return False
+        return current / peak < 0.70
 
-    def _read_cd_tesseract(self, skill_img: np.ndarray) -> int | None:
-        """Baca angka cooldown dari skill icon pakai Tesseract (1x per cd cycle)."""
+    def _read_cd_tesseract(self, skill_img: np.ndarray, max_cd: int = 120) -> int | None:
+        """Baca angka cooldown dari skill icon pakai Tesseract.
+
+        Full image 59x59 langsung — tanpa crop, tanpa shifting.
+        Hanya mencoba jika mean brightness < 80 (skill cooldown).
+        """
         if skill_img is None or skill_img.size == 0:
             return None
+
+        gray = cv2.cvtColor(skill_img, cv2.COLOR_BGR2GRAY)
+        if gray.mean() > 80:
+            return None
+
         try:
             import pytesseract
-            h, w = skill_img.shape[:2]
-            cx, cy = w // 2, h // 2
-            r = 14
-            center = skill_img[max(0,cy-r):min(h,cy+r), max(0,cx-r):min(w,cx+r)]
-            gray = cv2.cvtColor(center, cv2.COLOR_BGR2GRAY)
-
-            # Coba threshold dari tinggi ke rendah
-            for th in (240, 220, 200, 180):
+            for th in (200, 180, 160, 140, 130, 120, 110, 100):
                 _, binary = cv2.threshold(gray, th, 255, cv2.THRESH_BINARY)
-                white = cv2.countNonZero(binary)
-                if white < 3 or white > 100:
+                wpx = cv2.countNonZero(binary)
+                if wpx < 5 or wpx > gray.size * 0.2:
                     continue
-                inv = 255 - binary
-                big = cv2.resize(inv, (84, 84), interpolation=cv2.INTER_LINEAR)
+                big = cv2.resize(binary, (140, 140), interpolation=cv2.INTER_LINEAR)
                 text = pytesseract.image_to_string(
                     big, config='--psm 10 --oem 3 digits').strip()
                 cleaned = "".join(c for c in text if c.isdigit())
                 if cleaned:
                     val = int(cleaned)
-                    if 1 <= val <= 99:
-                        log.debug("Tesseract CD: %ds (th=%d, white=%d)", val, th, white)
+                    if 1 <= val <= max_cd:
                         return val
         except Exception:
             pass
         return None
 
     def _get_base_cooldown(self, skill_name: str) -> float | None:
-        """Cari base cooldown dari database hero atau hardcoded battle spell."""
-        # Battle spell hardcoded
+        """Cari base cooldown dari database hero atau battle spell."""
+        # Battle spell — pake spell yang sudah teridentifikasi
         if skill_name == "battle_spell":
-            return 90  # default, akurat nanti kalau hero udah terdeteksi
+            if self._cached_spell_cd is not None:
+                return self._cached_spell_cd
+            if self._cached_spell_key and self._cached_spell_key in self._BATTLE_SPELL_CDS:
+                return self._BATTLE_SPELL_CDS[self._cached_spell_key]
+            return 90.0  # fallback default
+
         if skill_name in self._BATTLE_SPELL_CDS:
             return self._BATTLE_SPELL_CDS[skill_name]
 
@@ -354,6 +437,12 @@ class DetectorManager:
         return None
 
     def _try_read_cd_async(self, skill_name: str, skill_img: np.ndarray, video_time: float):
+        """Async CD reader — tiap skill punya strategi berbeda.
+
+        - battle_spell: prioritaskan OCR angka CD langsung dari icon.
+          Angka yg terbaca = sisa detik cooldown yang akurat.
+        - Hero skills: template matching vs reference image + timer kalkulasi.
+        """
         last = self._cd_ocr_last_time.get(skill_name, -999.0)
         if video_time - last < self._CD_OCR_INTERVAL:
             return
@@ -362,29 +451,30 @@ class DetectorManager:
         self._cd_ocr_last_time[skill_name] = video_time
         self._cd_ocr_pending[skill_name] = True
         img_copy = skill_img.copy()
+
         def _worker():
             ref = self._cd_ref_images.get(skill_name)
+            is_on_cooldown = False
+
+            # ── Template matching vs reference ──
             if ref is not None:
                 h, w = ref.shape[:2]
                 current = cv2.resize(img_copy, (w, h)) if img_copy.shape[:2] != (h, w) else img_copy
                 ref_g = cv2.cvtColor(ref, cv2.COLOR_BGR2GRAY) if ref.ndim == 3 else ref
                 cur_g = cv2.cvtColor(current, cv2.COLOR_BGR2GRAY) if current.ndim == 3 else current
-                corr = float(cv2.matchTemplate(ref_g, cur_g, cv2.TM_CCOEFF_NORMED)[0][0])
-                diff = 1 - corr
-                if diff > 0.02:
-                    timer_end = self._cd_timers.get(skill_name)
-                    if timer_end is None or timer_end <= video_time:
-                        cd_sec = self._get_base_cooldown(skill_name)
-                        if cd_sec is None:
-                            cd_sec = self._BATTLE_SPELL_CDS.get(skill_name)
-                        if cd_sec:
-                            self._cd_timers[skill_name] = video_time + cd_sec * (1 - self._cdr)
-                else:
-                    self._cd_timers.pop(skill_name, None)
-                    self._cd_seen_ready.add(skill_name)
+
+                # Crop center — buang 30% tiap sisi, ambil 40% tengah
+                mx, my = int(w * 0.30), int(h * 0.30)
+                ref_c = ref_g[my:h-my, mx:w-mx]
+                cur_c = cur_g[my:h-my, mx:w-mx]
+
+                corr = float(cv2.matchTemplate(ref_c, cur_c, cv2.TM_CCOEFF_NORMED)[0][0])
+                is_on_cooldown = corr < 0.90
             else:
+                # Fallback: OCR or brightness
                 cd_found = self._read_cd_tesseract(img_copy)
                 if cd_found is not None:
+                    # Ketika OCR baca angka, pakai base cooldown untuk set timer penuh
                     timer_end = self._cd_timers.get(skill_name)
                     if timer_end is None or timer_end <= video_time:
                         cd_sec = self._get_base_cooldown(skill_name)
@@ -392,11 +482,40 @@ class DetectorManager:
                             cd_sec = self._BATTLE_SPELL_CDS.get(skill_name)
                         if cd_sec:
                             self._cd_timers[skill_name] = video_time + cd_sec * (1 - self._cdr)
-                else:
-                    gray = cv2.cvtColor(img_copy, cv2.COLOR_BGR2GRAY)
-                    if gray.mean() > 140:
-                        self._cd_timers.pop(skill_name, None)
-                        self._cd_seen_ready.add(skill_name)
+                    self._cd_ocr_pending[skill_name] = False
+                    return
+                gray = cv2.cvtColor(img_copy, cv2.COLOR_BGR2GRAY)
+                is_on_cooldown = gray.mean() < 100
+
+            # ── Multi-frame confirmation (hero skills only) ──
+            if is_on_cooldown:
+                rc = self._cd_ready_count.get(skill_name, 0)
+                if rc > 0:
+                    self._cd_ready_count[skill_name] = max(0, rc - 1)
+                cc = self._cd_cooldown_count.get(skill_name, 0) + 1
+                self._cd_cooldown_count[skill_name] = cc
+                self._cd_ready_count.setdefault(skill_name, 0)
+
+                if cc >= self._cd_confirm_frames:
+                    timer_end = self._cd_timers.get(skill_name)
+                    if timer_end is None or timer_end <= video_time:
+                        cd_sec = self._get_base_cooldown(skill_name)
+                        if cd_sec is None:
+                            cd_sec = self._BATTLE_SPELL_CDS.get(skill_name)
+                        if cd_sec:
+                            self._cd_timers[skill_name] = video_time + cd_sec * (1 - self._cdr)
+            else:
+                cc = self._cd_cooldown_count.get(skill_name, 0)
+                if cc > 0:
+                    self._cd_cooldown_count[skill_name] = max(0, cc - 1)
+                rc = self._cd_ready_count.get(skill_name, 0) + 1
+                self._cd_ready_count[skill_name] = rc
+                self._cd_cooldown_count.setdefault(skill_name, 0)
+
+                if rc >= self._cd_confirm_frames:
+                    self._cd_timers.pop(skill_name, None)
+                    self._cd_seen_ready.add(skill_name)
+
             self._cd_ocr_pending[skill_name] = False
         self._cd_ocr_executor.submit(_worker)
 
@@ -405,35 +524,33 @@ class DetectorManager:
         vt = video_time
         if skill_img is not None and skill_img.size:
             self._try_read_cd_async(skill_name, skill_img, vt)
-        visual_cd = self._check_cooldown_visual(skill_name, skill_img) if skill_img is not None else False
-        timer_end = self._cd_timers.get(skill_name)
 
+        visual_cd = self._check_cooldown_visual(skill_name, skill_img) if skill_img is not None else False
+
+        # Hysteresis: butuh N frame konsisten sebelum flip status
         if visual_cd:
+            vc = self._cd_cooldown_count.get(f"{skill_name}_visual", 0) + 1
+            self._cd_cooldown_count[f"{skill_name}_visual"] = vc
+            self._cd_ready_count.pop(f"{skill_name}_visual", None)
+        else:
+            vr = self._cd_ready_count.get(f"{skill_name}_visual", 0) + 1
+            self._cd_ready_count[f"{skill_name}_visual"] = vr
+            self._cd_cooldown_count.pop(f"{skill_name}_visual", None)
+
+        visual_cd_confirmed = self._cd_cooldown_count.get(f"{skill_name}_visual", 0) >= self._cd_confirm_frames
+        visual_ready_confirmed = self._cd_ready_count.get(f"{skill_name}_visual", 0) >= self._cd_confirm_frames
+
+        if visual_cd_confirmed:
             skill_info["cooldown"] = True
             skill_info["ready"] = False
-            if timer_end is None or timer_end <= vt:
-                cd_sec = None
-                if skill_name in self._cd_seen_ready:
-                    cd_sec = self._get_base_cooldown(skill_name)
-                if cd_sec is None:
-                    cd_sec = self._BATTLE_SPELL_CDS.get(skill_name)
-                if cd_sec:
-                    self._cd_timers[skill_name] = vt + cd_sec * (1 - self._cdr)
-                    log.info("CD start %s: %.0fs (CDR %.0f%%)",
-                             skill_name, cd_sec, self._cdr * 100)
-            remaining = self._cd_timers.get(skill_name, vt) - vt
-            if remaining > 0:
-                skill_info["cooldown_seconds"] = int(remaining) + 1
             return
-        if timer_end and timer_end > vt:
-            skill_info["cooldown"] = True
-            skill_info["ready"] = False
-            remaining = timer_end - vt
-            skill_info["cooldown_seconds"] = int(remaining) + 1
-            return
+
+        if visual_ready_confirmed:
+            self._cd_timers.pop(skill_name, None)
+            self._cd_seen_ready.add(skill_name)
+
         skill_info["ready"] = True
         skill_info["cooldown"] = False
-        skill_info.pop("cooldown_seconds", None)
         self._cd_seen_ready.add(skill_name)
 
 
@@ -531,13 +648,12 @@ def draw_status_overlay(frame: np.ndarray, status: dict[str, Any]):
         for name in ("passive", "skill_1", "skill_2", "skill_3", "battle_spell"):
             if name in skills:
                 s = skills[name]
-                label = name.replace("skill_", "S").replace("battle_spell", "SPELL")
+                if name == "battle_spell" and s.get("spell_name"):
+                    label = f"SPELL({s['spell_name']})"
+                else:
+                    label = name.replace("skill_", "S").replace("battle_spell", "SPELL")
 
-                cd_sec = s.get("cooldown_seconds")
-                if cd_sec is not None:
-                    text = f"  {label}: {cd_sec}s"
-                    color = (255, 150, 50)
-                elif s.get("ready", False):
+                if s.get("ready", False):
                     text = f"  {label}: READY"
                     color = (100, 255, 100)
                 elif s.get("cooldown", False):
@@ -923,9 +1039,10 @@ def main():
         if not paused:
             frame_count += 1
             video_time = frame_count / fps
-            if frame_count == 1:
-                detector_mgr.capture_skill_references(fr)
             if frame_count == 1 or frame_count % detect_every == 0:
+                # Capture skill references tiap siklus sampai semua terkumpul
+                if not detector_mgr._cd_ref_captured:
+                    detector_mgr.capture_skill_references(fr)
                 try:
                     vision_queue.put_nowait((fr.copy(), frame_count, video_time))
                 except queue.Full:
@@ -972,6 +1089,12 @@ def main():
             detector_mgr._cd_timers.clear()
             detector_mgr._cd_seen_ready.clear()
             detector_mgr._cd_ref_brightness.clear()
+            detector_mgr._cd_ref_images.clear()
+            detector_mgr._cd_ref_captured = False
+            detector_mgr._cd_cooldown_count.clear()
+            detector_mgr._cd_ready_count.clear()
+            detector_mgr._cached_spell_key = None
+            detector_mgr._cached_spell_cd = None
             with vision_status_lock:
                 vision_status.clear()
             frame_count = 0
