@@ -21,6 +21,15 @@ hero_panel:
     - 100
     type: template
     templates: heroes
+  hero_name:
+    description: Nama hero — teks putih di atas HP bar
+    bbox:
+    - 880
+    - 775
+    - 250
+    - 25
+    type: ocr
+    hint: text
   level:
     description: Level hero saat ini (angka)
     bbox:
@@ -84,3 +93,19 @@ hero_panel:
       - 59
       - 59
       type: template
+map:
+  description: Minimap — area kecil di pojok kiri atas layar
+  bbox:
+  - 80
+  - 0
+  - 350
+  - 340
+  type: composite
+  hero_icon:
+    description: Icon hero di minimap
+    type: template
+detectors:
+  level:
+    method: ocr
+    preprocess:
+    - invert_if_dark
