@@ -13,6 +13,17 @@ from typing import Any
 _LAYOUT_CACHE: dict[str, dict] = {}
 _LAYOUT_PATH = os.path.join(os.path.dirname(__file__), "..", "layout.yaml")
 
+# Scale factor for input frame downscaling.
+# When set to < 1.0, all bbox coordinates returned by get_region()
+# are proportionally scaled.
+_SCALE: float = 1.0
+
+
+def set_scale(s: float):
+    """Set global layout scale factor (for input frame downscaling)."""
+    global _SCALE
+    _SCALE = s
+
 
 def load(path: str | None = None) -> dict:
     """Load layout YAML (cached)."""
@@ -36,6 +47,10 @@ def get_region(*keys: str) -> dict | None:
             data = data[key]
         else:
             return None
+    if isinstance(data, dict) and "bbox" in data and _SCALE != 1.0:
+        bx, by, bw, bh = data["bbox"]
+        data = dict(data)  # shallow copy — cache tetap aman
+        data["bbox"] = [round(bx * _SCALE), round(by * _SCALE), round(bw * _SCALE), round(bh * _SCALE)]
     return data if isinstance(data, dict) else None
 
 
@@ -78,7 +93,13 @@ def enumerate_regions(prefix: str = "") -> list[tuple[str, dict]]:
         for key, val in node.items():
             cur = f"{path}.{key}" if path else key
             if isinstance(val, dict):
-                if "bbox" in val:
+                if "bbox" in val and _SCALE != 1.0:
+                    bx, by, bw, bh = val["bbox"]
+                    scaled = dict(val)
+                    scaled["bbox"] = [round(bx * _SCALE), round(by * _SCALE),
+                                      round(bw * _SCALE), round(bh * _SCALE)]
+                    result.append((cur, scaled))
+                elif "bbox" in val:
                     result.append((cur, val))
                 _walk(val, cur)
 
