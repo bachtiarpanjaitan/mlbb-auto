@@ -1,0 +1,72 @@
+video: {name: Mobile Legends Replay, width: 2400, height: 1080, fps: 30, aspect_ratio: '20:9'}
+hero_panel:
+  description: Panel info hero terpilih — portrait, text, HP bar, skill, item
+  bbox: [668, 771, 1058, 163]
+  type: composite
+  portrait:
+    description: Icon wajah hero terpilih
+    bbox: [700, 780, 110, 100]
+    type: template
+    templates: heroes
+  level:
+    description: Level hero saat ini (angka)
+    bbox: [840, 781, 40, 40]
+    type: ocr
+    hint: number
+  hp_bar:
+    description: HP bar — green bar di kanan text
+    bbox: [880, 790, 400, 20]
+    type: bar
+    color: green
+  mana_bar:
+    description: Mana/Energy bar
+    bbox: [1125, 425, 185, 12]
+    type: bar
+    color: blue
+  skills:
+    description: Skill hero — 5 slot berjajar
+    bbox: [840, 835, 434, 83]
+    type: composite
+    skill_1:
+      bbox: [845, 837, 70, 70]
+      type: template
+    skill_2:
+      bbox: [947, 835, 70, 70]
+      type: template
+    skill_3:
+      bbox: [1054, 835, 70, 70]
+      type: template
+    battle_spell:
+      bbox: [1205, 850, 59, 59]
+      type: template
+  items:
+    description: Item hero — 6 slot sejajar dengan spell
+    bbox: [1291, 847, 430, 65]
+    type: composite
+    item_1:
+      bbox: [1305, 850, 59, 59]
+      type: template
+    item_2:
+      bbox: [1373, 850, 59, 59]
+      type: template
+    item_3:
+      bbox: [1443, 851, 59, 59]
+      type: template
+    item_4:
+      bbox: [1512, 850, 59, 59]
+      type: template
+    item_5:
+      bbox: [1586, 851, 59, 59]
+      type: template
+    item_6:
+      bbox: [1653, 850, 59, 59]
+      type: template
+map:
+  description: Minimap — area kecil di pojok kiri atas layar
+  bbox: [80, 0, 350, 340]
+  type: composite
+  hero_icon: {description: Icon hero di minimap, type: template}
+detectors:
+  level:
+    method: ocr
+    preprocess: [invert_if_dark]
