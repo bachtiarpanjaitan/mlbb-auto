@@ -544,7 +544,7 @@ def draw_status_overlay(frame: np.ndarray, status: dict[str, Any]):
     # ── Build status lines ──
     lines: list[tuple[str, tuple[int, int, int]]] = []
 
-    lines.append(("═══ HERO PANEL ═══", (200, 200, 255)))
+    lines.append(("=== HERO PANEL ===", (200, 200, 255)))
 
     if status.get("hero_name"):
         lines.append((f"Hero:  {status['hero_name']}", (255, 255, 255)))
@@ -564,7 +564,7 @@ def draw_status_overlay(frame: np.ndarray, status: dict[str, Any]):
     # Skills
     skills = status.get("skills", {})
     if skills:
-        lines.append(("── Skills ──", (100, 200, 255)))
+        lines.append(("-- Skills --", (100, 200, 255)))
         for name in ("passive", "skill_1", "skill_2", "skill_3", "battle_spell"):
             if name in skills:
                 s = skills[name]
@@ -578,10 +578,10 @@ def draw_status_overlay(frame: np.ndarray, status: dict[str, Any]):
                     text = f"  {label}: READY"
                     color = (100, 255, 100)
                 elif s.get("cooldown", False):
-                    text = f"  {label}: ⏳"
+                    text = f"  {label}: CD"
                     color = (255, 100, 100)
                 else:
-                    text = f"  {label}: ?"
+                    text = f"  {label}: ----"
                     color = (200, 200, 200)
 
                 lines.append((text, color))
@@ -589,7 +589,7 @@ def draw_status_overlay(frame: np.ndarray, status: dict[str, Any]):
     # Items
     item_list = status.get("items", [])
     if item_list:
-        lines.append(("── Items ──", (100, 255, 200)))
+        lines.append(("-- Items --", (100, 255, 200)))
         for name in item_list:
             lines.append((f"  {name}", (200, 255, 200)))
 
@@ -619,7 +619,7 @@ def draw_status_overlay(frame: np.ndarray, status: dict[str, Any]):
 
 # ── Help Overlay ───────────────────────────────────────────────────────
 _HELP_LINES = [
-    ("── Controls ──", (200, 200, 255)),
+    ("-- Controls --", (200, 200, 255)),
     ("Space", "Pause / resume"),
     ("E", "Toggle layout editor"),
     ("S / Shift+S", "Save layout / Screenshot"),
