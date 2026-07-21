@@ -6,8 +6,6 @@ Tampilkan grid, region hero_panel, dan status deteksi hero di overlay kiri.
 from __future__ import annotations
 import sys, os, argparse, logging, yaml
 from typing import Any
-import threading, queue
-from concurrent.futures import ThreadPoolExecutor
 import cv2
 import numpy as np
 
@@ -107,27 +105,6 @@ class DetectorManager:
         self._cdr = 0.0  # cooldown reduction (future: dari item)
         self._cd_seen_ready: set[str] = set()  # skill sudah pernah terlihat ready
         self._cd_ref_brightness: dict[str, float] = {}  # reference brightness skill siap
-
-        # ── Background thread untuk deteksi CD tiap skill ──
-        self._cd_ocr_executor = ThreadPoolExecutor(max_workers=5)
-        self._cd_ocr_pending: dict[str, bool] = {}
-        self._cd_ocr_last_time: dict[str, float] = {}
-        self._CD_OCR_INTERVAL = 1.0
-
-        # ── Reference image CD detection ──
-        self._cd_ref_images: dict[str, np.ndarray] = {}  # skill_name -> reference crop (ready state)
-        self._cd_ref_captured: bool = False  # flag: sudah capture reference
-
-    def capture_skill_references(self, frame: np.ndarray):
-        """Capture skill icon references dari frame pertama (asumsi semua skill ready)."""
-        if self._cd_ref_captured:
-            return
-        for skill_name in ("passive", "skill_1", "skill_2", "skill_3", "battle_spell"):
-            img = crop_region(frame, "hero_panel", "skills", skill_name)
-            if img is not None and img.size:
-                self._cd_ref_images[skill_name] = img.copy()
-        self._cd_ref_captured = True
-        log.info("Skill references captured: %d skills", len(self._cd_ref_images))
 
     def detect(self, frame: np.ndarray, video_time: float = 0) -> dict[str, Any]:
         """Run all detectors on a frame and return status dict."""
@@ -232,10 +209,6 @@ class DetectorManager:
                     gray = cv2.cvtColor(item_img, cv2.COLOR_BGR2GRAY)
                     if gray.mean() < 30 or gray.std() < 28:
                         continue
-                    # Upscale crop jika lebih kecil dari template (59x59)
-                    h, w = item_img.shape[:2]
-                    if h < 50 or w < 50:
-                        item_img = cv2.resize(item_img, (59, 59), interpolation=cv2.INTER_LINEAR)
                     match = self._item_matcher.match(item_img)
                     if match and match.success and match.label:
                         entry = self._item_db.get(match.label)
@@ -356,86 +329,10 @@ class DetectorManager:
                 return key
         return None
 
-    def _try_read_cd_async(self, skill_name: str, skill_img: np.ndarray, video_time: float):
-        """
-        Background thread: deteksi CD tiap 1 detik per skill.
-
-        Metode utama: bandingkan icon skill saat ini vs reference (gambar saat ready).
-        Kalau berbeda → skill sedang CD → set timer dari BASE CD + CDR.
-        Kalau sama persis → skill ready → bersihkan timer.
-        """
-        last = self._cd_ocr_last_time.get(skill_name, -999.0)
-        if video_time - last < self._CD_OCR_INTERVAL:
-            return
-        if self._cd_ocr_pending.get(skill_name, False):
-            return
-
-        self._cd_ocr_last_time[skill_name] = video_time
-        self._cd_ocr_pending[skill_name] = True
-        img_copy = skill_img.copy()
-
-        def _worker():
-            ref = self._cd_ref_images.get(skill_name)
-
-            if ref is not None:
-                # Reference-based detection (metode utama)
-                # Resize current crop ke ukuran reference agar cocok
-                h, w = ref.shape[:2]
-                if img_copy.shape != ref.shape:
-                    current = cv2.resize(img_copy, (w, h), interpolation=cv2.INTER_LINEAR)
-                else:
-                    current = img_copy
-                diff = cv2.absdiff(ref, current).mean()
-
-                if diff > 15:
-                    # Berbeda dari reference → sedang CD → set timer
-                    timer_end = self._cd_timers.get(skill_name)
-                    if timer_end is None or timer_end <= video_time:
-                        cd_sec = self._get_base_cooldown(skill_name)
-                        if cd_sec is None:
-                            cd_sec = self._BATTLE_SPELL_CDS.get(skill_name)
-                        if cd_sec:
-                            self._cd_timers[skill_name] = video_time + cd_sec * (1 - self._cdr)
-                            log.info("CD start %s: %.0fs (CDR %.0f%%) by ref diff %.1f",
-                                     skill_name, cd_sec, self._cdr * 100, diff)
-                else:
-                    # Sama dengan reference → ready → bersihkan timer
-                    self._cd_timers.pop(skill_name, None)
-                    self._cd_seen_ready.add(skill_name)
-            else:
-                # Fallback: Tesseract + brightness (sebelum reference sempat di-capture)
-                cd_found = self._read_cd_tesseract(img_copy)
-                if cd_found is not None:
-                    timer_end = self._cd_timers.get(skill_name)
-                    if timer_end is None or timer_end <= video_time:
-                        cd_sec = self._get_base_cooldown(skill_name)
-                        if cd_sec is None:
-                            cd_sec = self._BATTLE_SPELL_CDS.get(skill_name)
-                        if cd_sec:
-                            self._cd_timers[skill_name] = video_time + cd_sec * (1 - self._cdr)
-                else:
-                    gray = cv2.cvtColor(img_copy, cv2.COLOR_BGR2GRAY)
-                    if gray.mean() > 140:
-                        self._cd_timers.pop(skill_name, None)
-                        self._cd_seen_ready.add(skill_name)
-            self._cd_ocr_pending[skill_name] = False
-
-        self._cd_ocr_executor.submit(_worker)
-
     def _update_skill_cooldown(self, skill_name: str, skill_img: np.ndarray | None,
                                skill_info: dict[str, Any], video_time: float = 0):
-        """
-        Update cooldown: timer + background thread tiap skill.
-
-        Main thread: visual check (cepat) + timer countdown.
-        Background thread: Tesseract deteksi CD tiap 1 detik, update timer.
-        """
+        """Update cooldown: visual check + timer kalkulasi dari database."""
         vt = video_time  # alias — waktu video, bukan wall clock
-
-        # Submit background thread (throttle 1s, tidak blocking)
-        if skill_img is not None and skill_img.size:
-            self._try_read_cd_async(skill_name, skill_img, vt)
-
         visual_cd = self._check_cooldown_visual(skill_name, skill_img) if skill_img is not None else False
         timer_end = self._cd_timers.get(skill_name)
 
@@ -444,12 +341,11 @@ class DetectorManager:
             skill_info["ready"] = False
 
             if timer_end is None or timer_end <= vt:
-                # Timer dari database (non-blocking, tanpa nunggu Tesseract)
-                cd_sec = None
-                if skill_name in self._cd_seen_ready:
+                # Coba Tesseract dulu (bisa baca meski skill dari awal cooldown)
+                cd_sec = self._read_cd_tesseract(skill_img)
+                # Fallback database cuma kalau pernah lihat skill ready
+                if cd_sec is None and skill_name in self._cd_seen_ready:
                     cd_sec = self._get_base_cooldown(skill_name)
-                if cd_sec is None:
-                    cd_sec = self._BATTLE_SPELL_CDS.get(skill_name)
                 if cd_sec:
                     self._cd_timers[skill_name] = vt + cd_sec * (1 - self._cdr)
                     log.info("CD start %s: %.0fs (CDR %.0f%%)",
@@ -868,32 +764,9 @@ def main():
     cap = cv2.VideoCapture(vp)
     fps = cap.get(cv2.CAP_PROP_FPS) or 30
     frame_delay = max(1, int(1000 / fps / a.speed))
-
-    # Target resolusi deteksi (persentase dari layout)
-    # Semakin kecil, semakin cepat deteksi. Layout ikut di-scale.
-    DETECT_SCALE = 1  # 75% dari layout = 1800x810
-
-    layout_meta = layout.video_meta()
-    layout_w = layout_meta.get("width", 2400)
-    layout_h = layout_meta.get("height", 1080)
-    target_w = int(layout_w * DETECT_SCALE)
-    target_h = int(layout_h * DETECT_SCALE)
-
-    video_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    video_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    input_scale = min(target_w / video_w, target_h / video_h)
-    scaled_w = int(video_w * input_scale)
-    scaled_h = int(video_h * input_scale)
-
-    # Set layout scale agar koordinat crop sesuai dengan resolusi target
-    layout.set_scale(DETECT_SCALE)
-
-    if input_scale != 1.0 or DETECT_SCALE != 1.0:
-        print(f"Video: {video_w}x{video_h} -> detect at {scaled_w}x{scaled_h} (layout x{DETECT_SCALE})")
-    print(f"Video: {fps:.1f} fps - {a.speed:.1f}x speed ({frame_delay}ms delay)")
-
-    dw = int(scaled_w * a.resize)
-    dh = int(scaled_h * a.resize)
+    print(f"Video: {fps:.1f} fps — {a.speed:.1f}× speed ({frame_delay}ms delay)")
+    dw = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) * a.resize)
+    dh = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) * a.resize)
 
     # Init detectors
     detector_mgr = DetectorManager()
@@ -908,69 +781,15 @@ def main():
 
     # ── Layout Editor ──
     layout_editor = _LayoutEditor()
-    cv2.setMouseCallback("MLBB Debug", _make_mouse_cb(layout_editor, scaled_w, scaled_h, dw, dh), layout_editor)
+    fw = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    fh = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    cv2.setMouseCallback("MLBB Debug", _make_mouse_cb(layout_editor, fw, fh, dw, dh), layout_editor)
     layout_edit_mode = False  # editor mati default, tekan E untuk aktifkan
 
     detect_every = 10
     frame_count = 0
 
     clean_frame = None  # snapshot saat pause
-
-    # ── Vision Engine (thread terpisah) ──
-    vision_queue: queue.Queue = queue.Queue(maxsize=2)
-    vision_status: dict[str, Any] = {}
-    vision_status_lock = threading.Lock()
-    vision_running = True
-
-    def _vision_worker():
-        """Vision engine thread: deteksi di background, video tetap smooth."""
-        nonlocal vision_status
-        while vision_running:
-            try:
-                frame, fc, vt = vision_queue.get(timeout=0.2)
-            except queue.Empty:
-                continue
-            try:
-                result = detector_mgr.detect(frame, vt)
-                with vision_status_lock:
-                    vision_status = result
-            except Exception as e:
-                log.warning("Vision engine error: %s", e)
-
-    vision_thread = threading.Thread(target=_vision_worker, daemon=True)
-    vision_thread.start()
-
-    # ── Overlay Thread (render overlay di background) ──
-    overlay_queue: queue.Queue = queue.Queue(maxsize=2)
-    display_frame: Any = None
-    display_lock = threading.Lock()
-    overlay_running = True
-
-    def _overlay_worker():
-        """Overlay thread: gambar grid, region boxes, status, help di background."""
-        nonlocal display_frame
-        while overlay_running:
-            try:
-                frame, status, grid_on, edit_mode, help_on, ov_on, editor =                     overlay_queue.get(timeout=0.2)
-            except queue.Empty:
-                continue
-            try:
-                if grid_on:
-                    draw_grid(frame)
-                draw_region_boxes(frame)
-                if edit_mode:
-                    editor.draw(frame)
-                if help_on:
-                    draw_help_overlay(frame)
-                if ov_on and status:
-                    draw_status_overlay(frame, status)
-                with display_lock:
-                    display_frame = frame
-            except Exception as e:
-                log.warning("Overlay error: %s", e)
-
-    overlay_thread = threading.Thread(target=_overlay_worker, daemon=True)
-    overlay_thread.start()
 
     while True:
         if not paused:
@@ -979,54 +798,33 @@ def main():
                 cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                 continue
 
-        # Scale frame ke resolusi layout agar deteksi konsisten
-        if input_scale != 1.0 and not paused:
-            fr = cv2.resize(fr, (scaled_w, scaled_h), interpolation=cv2.INTER_AREA)
-
-        # ── Detection (submit ke vision thread, tidak blocking) ──
+        # ── Detection ──
         if not paused:
             frame_count += 1
             video_time = frame_count / fps
-            if frame_count == 1:
-                # Capture reference skill images dari frame pertama
-                detector_mgr.capture_skill_references(fr)
             if frame_count == 1 or frame_count % detect_every == 0:
-                try:
-                    vision_queue.put_nowait((fr.copy(), frame_count, video_time))
-                except queue.Full:
-                    pass  # vision engine sibuk, skip frame ini
+                status = detector_mgr.detect(fr, video_time)
+                detector_mgr.latest_status = status
 
-        # Baca status terbaru dari vision thread
-        with vision_status_lock:
-            current_status = dict(vision_status) if vision_status else {}
-
-        # ── Drawing ── (submit ke overlay thread, tidak blocking) ──
+        # ── Drawing ── (pakai copy biar ga numpuk kalau paused)
         if paused and clean_frame is not None:
-            draw_src = clean_frame
+            draw_base = clean_frame.copy()
         else:
-            draw_src = fr
-
-        try:
-            overlay_queue.put_nowait((
-                draw_src.copy(), current_status,
-                show_grid, layout_edit_mode, show_help, show_overlay,
-                layout_editor,
-            ))
-        except queue.Full:
-            pass  # overlay sibuk, skip
-
-        # Baca hasil overlay terbaru
-        with display_lock:
-            render = display_frame
-
-        if render is not None:
-            if a.resize < 1:
-                vis = cv2.resize(render, (dw, dh))
-            else:
-                vis = render
-            cv2.imshow("MLBB Debug", vis)
+            draw_base = fr.copy()
+        if show_grid:
+            draw_grid(draw_base)
+        draw_region_boxes(draw_base)
+        if layout_edit_mode:
+            layout_editor.draw(draw_base)
+        if show_help:
+            draw_help_overlay(draw_base)
+        if show_overlay:
+            draw_status_overlay(draw_base, status)
+        if a.resize < 1:
+            vis = cv2.resize(draw_base, (dw, dh))
         else:
-            cv2.imshow("MLBB Debug", draw_src)
+            vis = draw_base
+        cv2.imshow("MLBB Debug", vis)
 
         # ── Controls ──
         k = cv2.waitKey(frame_delay) & 0xFF
@@ -1042,17 +840,13 @@ def main():
                 layout_editor.selected = None
                 layout_editor.mode = None
                 print("▶ Resumed")
-                # Kirim frame saat ini ke vision engine
-                vision_queue.put_nowait((fr.copy(), frame_count, frame_count / fps))
-                with vision_status_lock:
-                    current_status = dict(vision_status) if vision_status else {}
+                status = detector_mgr.detect(fr, frame_count / fps)
         if k == ord("r"):
             cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            detector_mgr.latest_status = {}
             detector_mgr._cd_timers.clear()
             detector_mgr._cd_seen_ready.clear()
             detector_mgr._cd_ref_brightness.clear()
-            with vision_status_lock:
-                vision_status.clear()
             frame_count = 0
         if k == ord("o"):
             show_overlay ^= True
@@ -1060,10 +854,8 @@ def main():
         if k == ord("d"):
             # Manual re-detect on current frame
             if paused:
-                vision_queue.put_nowait((fr.copy(), frame_count, frame_count / fps))
-                with vision_status_lock:
-                    current_status = dict(vision_status) if vision_status else {}
-                print(f"🔄 Re-detect → {current_status.get('hero_name', '?')}")
+                status = detector_mgr.detect(fr, frame_count / fps)
+                print(f"🔄 Re-detect → {status.get('hero_name', '?')}")
         if k == ord("g"):
             show_grid ^= True
             print(f"Grid: {'ON' if show_grid else 'OFF'}")

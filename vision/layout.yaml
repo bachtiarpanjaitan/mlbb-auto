@@ -10,7 +10,7 @@ hero_panel:
     templates: heroes
   level:
     description: Level hero saat ini (angka)
-    bbox: [840, 781, 40, 40]
+    bbox: [1077, 403, 40, 40]
     type: ocr
     hint: number
   hp_bar:
