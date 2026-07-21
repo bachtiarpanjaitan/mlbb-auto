@@ -67,6 +67,36 @@ class DetectorManager:
             log.warning("Failed to load hero templates: %s", e)
 
         self._hero_matcher = TemplateMatcher(threshold=0.35, templates=hero_templates)
+
+        # ── Load item database ──
+        self._item_db: dict[str, dict] = {}
+        item_db_path = os.path.join(base, "assets", "databases", "items.json")
+        try:
+            with open(item_db_path) as f:
+                for item in json.load(f):
+                    self._item_db[item["key"]] = item
+            log.info("Loaded %d items from database", len(self._item_db))
+        except Exception as e:
+            log.warning("Failed to load items.json: %s", e)
+
+        # ── Load item templates (resize ke 59x59 = ukuran item slot) ──
+        self._item_matcher = None
+        item_templates: dict[str, np.ndarray] = {}
+        items_path = os.path.join(base, "assets", "items")
+        try:
+            for fname in sorted(os.listdir(items_path)):
+                if fname.endswith(".png"):
+                    stem = fname[:-4]
+                    img = cv2.imread(os.path.join(items_path, fname))
+                    if img is not None:
+                        img = cv2.resize(img, (59, 59), interpolation=cv2.INTER_AREA)
+                        item_templates[stem] = img
+            log.info("Loaded %d item templates (59x59)", len(item_templates))
+        except Exception as e:
+            log.warning("Failed to load item templates: %s", e)
+        if item_templates:
+            self._item_matcher = TemplateMatcher(threshold=0.25, templates=item_templates)
+
         log.info("Detectors initialized")
 
         # ── Cooldown tracker ──
@@ -168,6 +198,29 @@ class DetectorManager:
                 skills_status[skill_name] = skill_info
         if skills_status:
             status["skills"] = skills_status
+
+        # ── Items (template matching) ──
+        if self._item_matcher is not None:
+            item_names: list[str] = []
+            for item_slot in ("item_1", "item_2", "item_3", "item_4", "item_5", "item_6"):
+                item_img = crop_region(frame, "hero_panel", "items", item_slot)
+                if item_img is not None and item_img.size:
+                    # Skip slot kosong (gelap, std rendah)
+                    gray = cv2.cvtColor(item_img, cv2.COLOR_BGR2GRAY)
+                    if gray.mean() < 30 or gray.std() < 28:
+                        continue
+                    match = self._item_matcher.match(item_img)
+                    if match and match.success and match.label:
+                        entry = self._item_db.get(match.label)
+                        if entry:
+                            name = entry.get("name", match.label)
+                        else:
+                            name = match.label.replace("_", " ").title()
+                        item_names.append(name)
+                        log.debug("Item %s: %s (%.0f%%)", item_slot, name, match.confidence * 100)
+            if item_names:
+                status["items"] = item_names
+                log.debug("Items: %s", ", ".join(item_names))
 
         return status
 
@@ -425,6 +478,13 @@ def draw_status_overlay(frame: np.ndarray, status: dict[str, Any]):
                     color = (200, 200, 200)
 
                 lines.append((text, color))
+
+    # Items
+    item_list = status.get("items", [])
+    if item_list:
+        lines.append(("── Items ──", (100, 255, 200)))
+        for name in item_list:
+            lines.append((f"  {name}", (200, 255, 200)))
 
     # ── Draw background panel (kanan) ──
     panel_w = 320
