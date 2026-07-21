@@ -218,19 +218,23 @@ class DetectorManager:
             r = 14
             center = skill_img[max(0,cy-r):min(h,cy+r), max(0,cx-r):min(w,cx+r)]
             gray = cv2.cvtColor(center, cv2.COLOR_BGR2GRAY)
-            _, binary = cv2.threshold(gray, 180, 255, cv2.THRESH_BINARY)
-            if cv2.countNonZero(binary) < 5:
-                return None
-            inv = 255 - binary
-            big = cv2.resize(inv, (84, 84), interpolation=cv2.INTER_LINEAR)
-            text = pytesseract.image_to_string(
-                big, config='--psm 10 --oem 3 digits').strip()
-            cleaned = "".join(c for c in text if c.isdigit())
-            if cleaned:
-                val = int(cleaned)
-                if 1 <= val <= 99:
-                    log.debug("Tesseract CD read: %ds", val)
-                    return val
+
+            # Coba threshold dari tinggi ke rendah
+            for th in (240, 220, 200, 180):
+                _, binary = cv2.threshold(gray, th, 255, cv2.THRESH_BINARY)
+                white = cv2.countNonZero(binary)
+                if white < 3 or white > 100:
+                    continue
+                inv = 255 - binary
+                big = cv2.resize(inv, (84, 84), interpolation=cv2.INTER_LINEAR)
+                text = pytesseract.image_to_string(
+                    big, config='--psm 10 --oem 3 digits').strip()
+                cleaned = "".join(c for c in text if c.isdigit())
+                if cleaned:
+                    val = int(cleaned)
+                    if 1 <= val <= 99:
+                        log.debug("Tesseract CD: %ds (th=%d, white=%d)", val, th, white)
+                        return val
         except Exception:
             pass
         return None
@@ -281,16 +285,15 @@ class DetectorManager:
             skill_info["ready"] = False
 
             if timer_end is None or timer_end <= vt:
-                if skill_name in self._cd_seen_ready:
-                    # Coba Tesseract dulu (lebih akurat)
-                    cd_sec = self._read_cd_tesseract(skill_img)
-                    # Fallback ke database
-                    if cd_sec is None:
-                        cd_sec = self._get_base_cooldown(skill_name)
-                    if cd_sec:
-                        self._cd_timers[skill_name] = vt + cd_sec * (1 - self._cdr)
-                        log.info("CD start %s: %.0fs (CDR %.0f%%)",
-                                 skill_name, cd_sec, self._cdr * 100)
+                # Coba Tesseract dulu (bisa baca meski skill dari awal cooldown)
+                cd_sec = self._read_cd_tesseract(skill_img)
+                # Fallback database cuma kalau pernah lihat skill ready
+                if cd_sec is None and skill_name in self._cd_seen_ready:
+                    cd_sec = self._get_base_cooldown(skill_name)
+                if cd_sec:
+                    self._cd_timers[skill_name] = vt + cd_sec * (1 - self._cdr)
+                    log.info("CD start %s: %.0fs (CDR %.0f%%)",
+                             skill_name, cd_sec, self._cdr * 100)
 
             remaining = self._cd_timers.get(skill_name, vt) - vt
             if remaining > 0:
