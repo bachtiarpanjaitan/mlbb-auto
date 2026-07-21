@@ -51,31 +51,31 @@ hero_panel:
   skills:
     description: Skill hero — 5 slot berjajar
     bbox:
-    - 690
-    - 965
-    - 485
+    - 840
+    - 835
+    - 425
     - 85
     type: composite
     skill_1:
       bbox:
-      - 840
-      - 835
-      - 82
-      - 82
+      - 845
+      - 837
+      - 70
+      - 70
       type: template
     skill_2:
       bbox:
       - 947
       - 835
-      - 82
-      - 82
+      - 70
+      - 70
       type: template
     skill_3:
       bbox:
       - 1054
       - 835
-      - 82
-      - 82
+      - 70
+      - 70
       type: template
     battle_spell:
       bbox:
