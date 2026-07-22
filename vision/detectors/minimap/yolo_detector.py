@@ -37,7 +37,26 @@ class YOLOMinimapDetector:
         self.iou_threshold = iou_threshold
         self.input_size = input_size
         self._model = None
+        self._last_result: list = []
+        self._lock = False
         self._load_model()
+
+    @property
+    def last_result(self) -> list:
+        return list(self._last_result)
+
+    def detect_async(self, minimap_img: np.ndarray):
+        import threading
+        def _run():
+            try:
+                self._lock = True
+                if minimap_img is not None and minimap_img.size > 0:
+                    self._last_result = self.detect(minimap_img)
+            finally:
+                self._lock = False
+        if not self._lock:
+            t = threading.Thread(target=_run, daemon=True)
+            t.start()
 
     def _get_device(self) -> str:
         """Auto-detect best available device."""

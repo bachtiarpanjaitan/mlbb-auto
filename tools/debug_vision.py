@@ -417,48 +417,6 @@ class DetectorManager:
                         self.minimap_hero_tracker.set_portrait_crops(portraits)
                         log.info("✅ Set %d hero portrait crops as templates", len(portraits))
 
-        # Crop minimap dan track hero positions
-        if not hasattr(self, '_minimap_last_frame'):
-            self._minimap_last_frame = 0
-            self._minimap_heroes = []
-
-        mm_frame_interval = 3  # update every 3 frames
-        if video_time > 0 or True:  # always run once available
-            mm_img = crop_region(frame, "map")
-            if mm_img is not None and mm_img.size > 0:
-                mm_heroes = self.minimap_hero_tracker.update(mm_img, frame_idx)
-                self._minimap_heroes = mm_heroes
-                status["minimap_heroes"] = [
-                    {
-                        "name": h.name,
-                        "team": h.team,
-                        "norm_x": round(h.norm_x, 3),
-                        "norm_y": round(h.norm_y, 3),
-                        "pixel_x": h.pixel_x,
-                        "pixel_y": h.pixel_y,
-                        "confidence": round(h.confidence, 3),
-                        "game_x": round(h.game_pos.x, 1) if h.game_pos else None,
-                        "game_y": round(h.game_pos.y, 1) if h.game_pos else None,
-                        "lane": h.game_pos.lane if h.game_pos else None,
-                        "nearest": h.game_pos.nearest_landmark if h.game_pos else None,
-                    }
-                    for h in mm_heroes
-                ]
-                status["minimap_tracking_active"] = True
-            else:
-                status["minimap_tracking_active"] = False
-
-        # ── Debug: raw detection data untuk minimap overlay ──
-        debug_data = self.minimap_hero_tracker.get_last_debug_data()
-        if debug_data:
-            # Simpan mask dan raw contours untuk visualization di overlay
-            status["_mm_debug"] = {
-                "blue_mask": debug_data.get("blue_mask"),
-                "red_mask": debug_data.get("red_mask"),
-                "blue_dots": debug_data.get("blue_dots", []),
-                "red_dots": debug_data.get("red_dots", []),
-            }
-
         # ── Items + CDR (SEBELUM skills, biar _cdr up-to-date) ──
         self._cdr = 0.0
         if self._item_matcher is not None:
@@ -919,10 +877,10 @@ def draw_minimap_heroes(frame: np.ndarray, status: dict[str, Any],
     if not heroes:
         return
 
-    fs = 1.2
-    thick = 4
-    dot_r = 22
-    glow_r = 34
+    fs = 0.8
+    thick = 3
+    dot_r = 16
+    glow_r = 26
 
     for entry in heroes:
         px = mm_x + entry.get("pixel_x", 0)
@@ -956,7 +914,7 @@ def draw_minimap_heroes(frame: np.ndarray, status: dict[str, Any],
         (tw, th), bl = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, fs, thick)
         lx = px + dot_r + 8
         ly = py + th // 3
-        pad = max(4, int(6 * scale))
+        pad = 8
 
         cv2.rectangle(frame, (lx - pad, ly - th - pad), (lx + tw + pad, ly + pad),
                       (0, 0, 0), -1)
@@ -1474,7 +1432,7 @@ def main():
     cv2.setMouseCallback("MLBB Debug", _make_mouse_cb(layout_editor, fw, fh, dw, dh), layout_editor)
     layout_edit_mode = False  # editor mati default, tekan E untuk aktifkan
 
-    detect_every = 10
+    detect_every = 30
     frame_count = 0
 
     clean_frame = None  # snapshot saat pause
@@ -1567,6 +1525,29 @@ def main():
         # Baca status terbaru dari vision thread
         with vision_status_lock:
             current_status = dict(vision_status) if vision_status else {}
+
+        # ── Minimap tracking tiap frame (YOLO async jadi cepet) ──
+        if not paused:
+            mm_img = crop_region(fr, "map")
+            if mm_img is not None and mm_img.size > 0:
+                mm_heroes = detector_mgr.minimap_hero_tracker.update(mm_img, frame_count)
+                current_status["minimap_heroes"] = [
+                    {"name": h.name, "team": h.team,
+                     "norm_x": round(h.norm_x, 3), "norm_y": round(h.norm_y, 3),
+                     "pixel_x": h.pixel_x, "pixel_y": h.pixel_y,
+                     "confidence": round(h.confidence, 3),
+                     "game_x": round(h.game_pos.x, 1) if h.game_pos else None,
+                     "game_y": round(h.game_pos.y, 1) if h.game_pos else None,
+                     "lane": h.game_pos.lane if h.game_pos else None,
+                     "nearest": h.game_pos.nearest_landmark if h.game_pos else None}
+                    for h in mm_heroes
+                ]
+                current_status["minimap_tracking_active"] = True
+                dd = detector_mgr.minimap_hero_tracker.get_last_debug_data()
+                if dd:
+                    current_status["_mm_debug"] = {"blue_mask": dd.get("blue_mask"),
+                        "red_mask": dd.get("red_mask"), "blue_dots": dd.get("blue_dots", []),
+                        "red_dots": dd.get("red_dots", [])}
 
         # ── Sync HP tracker → merge HP untuk blue + red ──
         hp_tracker.sync_frame(frame_count)

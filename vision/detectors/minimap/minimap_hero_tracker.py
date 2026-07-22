@@ -579,12 +579,13 @@ class MinimapHeroTracker:
     def _detect_circles_fast(
         self, minimap_img: np.ndarray,
     ) -> list[tuple[str, int, int, int]]:
-        """Detect via YOLO (primary) or HSV+cirularity (fallback)."""
+        """Detect via YOLO (async cache) or HSV (fallback)."""
         if minimap_img is None or minimap_img.size == 0:
             return []
-        # YOLO detection
+        # YOLO: pakai hasil async + trigger inference berikutnya
         if self._yolo_detector is not None:
-            dets = self._yolo_detector.detect(minimap_img)
+            dets = self._yolo_detector.last_result
+            self._yolo_detector.detect_async(minimap_img)
             result = [(team, cx, cy, r) for team, cx, cy, r, _ in dets]
             result.sort(key=lambda x: -x[3])
             final, used = [], []
