@@ -29,9 +29,34 @@ WHITE = (255, 255, 255)
 BLACK = (20, 20, 20)
 GRAY = (120, 120, 120)
 
-CLASS_NAMES = {0: "blue_hero", 1: "red_hero", 2: "jungle"}
-CLASS_COLORS = {0: BLUE, 1: RED, 2: GREEN}
+CLASS_NAMES = {
+    0: "blue_hero", 1: "red_hero",
+    2: "lord", 3: "turtle",
+    4: "thunder_fenrir", 5: "molten_fiend",
+    6: "lithowanderer", 7: "crab",
+    8: "lava_golem", 9: "fire_beetle", 10: "horned_lizard"
+}
 
+CLASS_COLORS = {
+    0: (255, 180, 30),    # Blue
+    1: (30, 30, 255),     # Red
+    2: (255, 0, 255),     # Lord (Magenta)
+    3: (0, 255, 0),       # Turtle (Green)
+    4: (255, 255, 0),     # Thunder Fenrir (Cyan)
+    5: (0, 140, 255),     # Molten Fiend (Orange)
+    6: (200, 255, 0),     # Lithowanderer (Yellow-Green)
+    7: (0, 215, 255),     # Crab (Gold)
+    8: (180, 0, 180),     # Lava Golem (Purple)
+    9: (0, 100, 255),     # Fire Beetle (Dark Orange)
+    10: (255, 100, 200),  # Horned Lizard (Pink)
+}
+
+CLASS_KEYS = {
+    ord('b'): 0, ord('r'): 1, ord('l'): 2, ord('t'): 3,
+    ord('0'): 0, ord('1'): 1, ord('2'): 2, ord('3'): 3,
+    ord('4'): 4, ord('5'): 5, ord('6'): 6, ord('7'): 7,
+    ord('8'): 8, ord('9'): 9, ord('k'): 10, ord('K'): 10,
+}
 
 def load_dataset_items(base_dir: Path, split: str = "train") -> list[tuple[Path, Path | None]]:
     """Cari semua file gambar dan pasangannya file label .txt"""
@@ -192,18 +217,35 @@ def main():
     print("   [ Klik Kiri pada Kosong ] : Tambah dot mode aktif")
     print("   [ Klik pada Dot Ada ]    : Hapus dot tersebut")
     print("   [ Klik Kanan ]           : Tambah red_hero (shortcut) / Hapus dot")
-    print("   [ B / 0 ] = Blue | [ R / 1 ] = Red | [ J / 2 ] = Jungle")
-    print("   [ U ] = Undo Dot  | [ C ] = Clear All Dots")
+    print("   [ 0-9, K, B, R, L, T ]   : Pilih Class (0=Blue, 1=Red, 2-10=Jungle)")
+    print("   [ TAB ]                  : Ganti class berikutnya")
+    print("   [ U ] = Undo Dot  | [ C ] = Clear All Dots | [ E ] = Crop Jungle")
     print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
 
     current_idx = 0
     active_class = 0  # Default class: blue_hero
     display_scale = 1.6
     header_h = 130
+    RIGHT_PANEL_W = 260
+
+    # Shortcut legend for right panel
+    CLASS_LABELS_SHORT = {
+        0:  "0/B: blue_hero",
+        1:  "1/R: red_hero",
+        2:  "2/L: lord",
+        3:  "3/T: turtle",
+        4:  "4:   blue_buff (fenrir)",
+        5:  "5:   red_buff (fiend)",
+        6:  "6:   lithowanderer",
+        7:  "7:   crab (gold)",
+        8:  "8:   lava_golem",
+        9:  "9:   fire_beetle",
+        10: "K/10:horned_lizard",
+    }
 
     window_name = "MLBB Minimap Dataset Inspector"
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
-    cv2.resizeWindow(window_name, 700, 750)
+    cv2.resizeWindow(window_name, 700 + RIGHT_PANEL_W, 750)
 
     # Variables for mouse callback
     mouse_event_triggered = [False]
@@ -225,7 +267,7 @@ def main():
             return
         h, w = img_temp.shape[:2]
 
-        # Calculate coordinates relative to image canvas
+        # Calculate coordinates relative to image canvas (ignore right panel)
         rel_y = y - header_h
         if rel_y < 0 or rel_y >= int(h * display_scale) or x < 0 or x >= int(w * display_scale):
             return
@@ -273,10 +315,19 @@ def main():
 
     while True:
         img_path, lbl_path = items[current_idx]
+
+        # Selalu cek ulang lbl_path dari disk — agar label yang ditambah
+        # setelah startup (misal dari label_minimap.py) ikut terbaca
+        split_dir = "val" if "val" in str(img_path) else "train"
+        real_lbl = base_dir / "labels" / split_dir / f"{img_path.stem}.txt"
+        if real_lbl.exists() and lbl_path is None:
+            lbl_path = real_lbl
+            items[current_idx] = (img_path, lbl_path)
+
         img = cv2.imread(str(img_path))
 
         if img is None:
-            canvas = np.zeros((400, 500, 3), dtype=np.uint8)
+            canvas = np.zeros((400, 500 + RIGHT_PANEL_W, 3), dtype=np.uint8)
             cv2.putText(canvas, f"Gagal membaca: {img_path.name}", (20, 200),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, RED, 1)
         else:
@@ -288,62 +339,102 @@ def main():
             dw, dh = int(w * display_scale), int(h * display_scale)
             resized_vis = cv2.resize(vis_img, (dw, dh), interpolation=cv2.INTER_NEAREST)
 
-            # Buat Panel Informasi / Header
-            canvas = np.zeros((dh + header_h, dw, 3), dtype=np.uint8)
-            canvas[:header_h, :] = (30, 30, 35)
+            # Buat canvas dengan right panel
+            canvas = np.zeros((dh + header_h, dw + RIGHT_PANEL_W, 3), dtype=np.uint8)
+            canvas[:header_h, :dw] = (30, 30, 35)
 
             # Judul & File Info
             split_tag = "VAL" if "val" in str(img_path) else "TRAIN"
-            cv2.putText(canvas, f"[{split_tag}] Image ({current_idx + 1}/{len(items)}): {img_path.name}",
-                        (12, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.5, GREEN, 1, cv2.LINE_AA)
-
-            # Active Mode
-            mode_name = CLASS_NAMES.get(active_class, f"cls_{active_class}")
-            mode_color = CLASS_COLORS.get(active_class, GREEN)
-            cv2.putText(canvas, f"Mode Tambah: {mode_name} [B/R/J]", (dw - 220, 25),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, mode_color, 1, cv2.LINE_AA)
+            cv2.putText(canvas, f"[{split_tag}] ({current_idx + 1}/{len(items)}): {img_path.name}",
+                        (12, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.48, GREEN, 1, cv2.LINE_AA)
 
             # Label status
             blue_cnt = sum(1 for l in labels_info if l["class_id"] == 0)
             red_cnt = sum(1 for l in labels_info if l["class_id"] == 1)
-            jungle_cnt = sum(1 for l in labels_info if l["class_id"] == 2)
+            jungle_cnt = sum(1 for l in labels_info if l["class_id"] >= 2)
 
             if lbl_path and lbl_path.exists() and len(labels_info) > 0:
-                lbl_status = f"Labels: {len(labels_info)} (B: {blue_cnt}, R: {red_cnt}, J: {jungle_cnt})"
+                lbl_status = f"Labels: {len(labels_info)} | Blue:{blue_cnt} Red:{red_cnt} Jungle:{jungle_cnt}"
                 lbl_color = (200, 255, 200)
             else:
-                lbl_status = "⚠️ Belum ada label / Empty"
+                lbl_status = "Belum ada label / Empty"
                 lbl_color = RED if not (lbl_path and lbl_path.exists()) else (180, 180, 180)
 
             cv2.putText(canvas, lbl_status, (12, 48),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, lbl_color, 1, cv2.LINE_AA)
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.42, lbl_color, 1, cv2.LINE_AA)
 
             # Detail koordinat label / Action msg
             if last_action_msg[0]:
                 cv2.putText(canvas, last_action_msg[0], (12, 70),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 255), 1, cv2.LINE_AA)
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.42, (0, 255, 255), 1, cv2.LINE_AA)
             else:
-                details_str = " | ".join([f"#{l['id']}{l['class_name'][:1]}({l['cx']},{l['cy']})" for l in labels_info])
+                details_str = " | ".join([f"#{l['id']}{l['class_name'][:2]}({l['cx']},{l['cy']})" for l in labels_info])
                 if not details_str:
-                    details_str = "Klik pada gambar untuk menambah dot label"
-                cv2.putText(canvas, details_str[:70], (12, 70),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.4, (180, 180, 180), 1, cv2.LINE_AA)
+                    details_str = "Klik gambar untuk tambah dot"
+                cv2.putText(canvas, details_str[:75], (12, 70),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.38, (180, 180, 180), 1, cv2.LINE_AA)
 
             # Baris Bantuan Navigasi
-            cv2.rectangle(canvas, (0, 85), (dw, header_h), (45, 45, 55), -1)
-            cv2.putText(canvas, "[Klik] Add/Del | [B/R/J] Class | [U] Undo | [X] DelImg | [<-/->] Nav",
-                        (12, 112), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 220, 255), 1, cv2.LINE_AA)
+            cv2.rectangle(canvas, (0, 80), (dw, header_h), (45, 45, 55), -1)
+            cv2.putText(canvas, "[Klik] Add/Del | [TAB] Ganti class | [U] Undo | [C] Clear | [X] Del | [<->] Nav",
+                        (12, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.37, (0, 220, 255), 1, cv2.LINE_AA)
+            cv2.putText(canvas, "[0-9/K/B/R/L/T] Pilih Class | [E] Crop Jungle | [Q] Quit",
+                        (12, 118), cv2.FONT_HERSHEY_SIMPLEX, 0.37, (0, 220, 255), 1, cv2.LINE_AA)
 
             # Tempel gambar ke canvas
-            canvas[header_h:, :] = resized_vis
+            canvas[header_h:, :dw] = resized_vis
+
+            # ── RIGHT PANEL ──
+            panel_x = dw
+            canvas[:, panel_x:] = (20, 20, 25)
+            cv2.line(canvas, (panel_x, 0), (panel_x, dh + header_h), (80, 80, 80), 2)
+
+            cv2.putText(canvas, "SELECT CLASS", (panel_x + 10, 22),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.52, (255, 255, 255), 2, cv2.LINE_AA)
+            cv2.putText(canvas, "[0-9 / K / TAB]", (panel_x + 10, 42),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.42, (160, 160, 160), 1, cv2.LINE_AA)
+            cv2.line(canvas, (panel_x + 8, 50), (panel_x + RIGHT_PANEL_W - 8, 50), (80, 80, 80), 1)
+
+            y_off = 72
+            for cls_id in range(11):
+                color = CLASS_COLORS[cls_id]
+                lbl = CLASS_LABELS_SHORT[cls_id]
+                count = sum(1 for l in labels_info if l["class_id"] == cls_id)
+
+                if cls_id == active_class:
+                    cv2.rectangle(canvas,
+                                  (panel_x + 4, y_off - 16),
+                                  (panel_x + RIGHT_PANEL_W - 4, y_off + 6),
+                                  (60, 60, 75), -1)
+                    cv2.rectangle(canvas,
+                                  (panel_x + 4, y_off - 16),
+                                  (panel_x + RIGHT_PANEL_W - 4, y_off + 6),
+                                  color, 2)
+
+                # Color swatch
+                cv2.rectangle(canvas,
+                              (panel_x + 10, y_off - 12),
+                              (panel_x + 24, y_off + 2),
+                              color, -1)
+
+                cnt_str = f" ({count})" if count > 0 else ""
+                txt_color = (255, 255, 255) if cls_id == active_class else (160, 160, 160)
+                cv2.putText(canvas, f"{lbl}{cnt_str}",
+                            (panel_x + 30, y_off),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.42, txt_color, 1, cv2.LINE_AA)
+                y_off += 24
+
+            cv2.line(canvas, (panel_x + 8, y_off + 4), (panel_x + RIGHT_PANEL_W - 8, y_off + 4), (80, 80, 80), 1)
+            cv2.putText(canvas, "TAB = cycle class",
+                        (panel_x + 10, dh + header_h - 12),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.38, (0, 200, 255), 1, cv2.LINE_AA)
 
         cv2.imshow(window_name, canvas)
 
-        # Non-blocking wait if mouse event was triggered to refresh UI immediately
-        wait_ms = 20 if mouse_event_triggered[0] else 0
+        # Selalu gunakan timeout kecil agar mouse click bisa memicu redraw
+        # waitKeyEx(0) memblok indefinitely → klik mouse tidak trigger refresh
         mouse_event_triggered[0] = False
-
-        key = cv2.waitKeyEx(wait_ms)
+        key = cv2.waitKeyEx(16)  # ~60fps polling
         if key == -1:
             continue
 
@@ -352,15 +443,14 @@ def main():
         # Handle Tombol Keyboard
         if key in (27, ord('q'), ord('Q')):  # ESC / Q
             break
-        elif key in (ord('b'), ord('B'), ord('0')):  # Mode Blue Hero
-            active_class = 0
-            last_action_msg[0] = "Mode: BLUE_HERO"
-        elif key in (ord('r'), ord('R'), ord('1')):  # Mode Red Hero
-            active_class = 1
-            last_action_msg[0] = "Mode: RED_HERO"
-        elif key in (ord('j'), ord('J'), ord('2')):  # Mode Jungle
-            active_class = 2
-            last_action_msg[0] = "Mode: JUNGLE"
+        elif key in CLASS_KEYS:
+            active_class = CLASS_KEYS[key]
+            mode_name = CLASS_NAMES[active_class]
+            last_action_msg[0] = f"Mode: {mode_name.upper()}"
+        elif key == 9:  # TAB key
+            active_class = (active_class + 1) % 11
+            mode_name = CLASS_NAMES[active_class]
+            last_action_msg[0] = f"Mode: {mode_name.upper()}"
         elif key in (ord('u'), ord('U')):  # Undo last dot
             raw_labels = load_raw_labels(lbl_path)
             if raw_labels:
@@ -372,9 +462,9 @@ def main():
             if lbl_path and lbl_path.exists():
                 save_labels(lbl_path, [])
                 last_action_msg[0] = "🧹 Semua label dihapus"
-        elif key in (ord('k'), ord('K')):  # Crop jungle patches
+        elif key in (ord('e'), ord('E')):  # Crop jungle patches
             raw_labels = load_raw_labels(lbl_path)
-            jungle_labels = [l for l in raw_labels if l[0] == 2]
+            jungle_labels = [l for l in raw_labels if l[0] >= 2]
             if not jungle_labels:
                 last_action_msg[0] = "⚠️ Tidak ada label jungle di gambar ini"
             else:
