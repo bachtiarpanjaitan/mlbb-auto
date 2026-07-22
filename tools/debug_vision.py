@@ -158,21 +158,9 @@ class DetectorManager:
         else:
             status["hero_name"] = "...scanning"
         last_log = getattr(self, '_last_scan_log', 0)
-        if not self._cached_hero_name and video_time > 0 and video_time - last_log >= 3:
+        if video_time > 0 and video_time - last_log >= 3:
             log.info("⏳ Hero masih scanning... (%.0fs)", video_time)
             self._last_scan_log = video_time
-
-        # ── Deteksi hero via template matching ──
-        if not self._cached_hero_name:
-            portrait_img = crop_region(frame, "hero_panel", "portrait")
-            if portrait_img is not None and portrait_img.size:
-                match = self._hero_matcher.match(portrait_img)
-                if match and match.success and match.confidence > 0.40:
-                    entry = self._hero_db.get(match.label)
-                    name = entry.get("name", match.label.replace("_", " ").title()) if entry else match.label.replace("_", " ").title()
-                    self._cached_hero_name = name
-                    status["hero_name"] = name
-                    log.info("✅ Hero: %s (%.0f%%)", name, match.confidence * 100)
 
         # ── Simpan sample portrait ke .tmp/ (sekali saja, untuk referensi) ──
         if not getattr(self, '_portrait_saved', False) and video_time > 3:

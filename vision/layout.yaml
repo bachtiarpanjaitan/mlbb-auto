@@ -10,7 +10,7 @@ hero_panel:
     templates: heroes
   level:
     description: Level hero saat ini (angka)
-    bbox: [840, 781, 40, 40]
+    bbox: [838, 780, 45, 41]
     type: ocr
     hint: number
   hp_bar:
@@ -18,11 +18,6 @@ hero_panel:
     bbox: [880, 790, 400, 20]
     type: bar
     color: green
-  mana_bar:
-    description: Mana/Energy bar
-    bbox: [1095, 417, 185, 12]
-    type: bar
-    color: blue
   skills:
     description: Skill hero — 5 slot berjajar
     bbox: [840, 835, 434, 83]
