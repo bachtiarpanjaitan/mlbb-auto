@@ -1,11 +1,11 @@
 video: {name: Mobile Legends Replay, width: 2400, height: 1080, fps: 30, aspect_ratio: '20:9'}
 hero_panel:
   description: Panel info hero terpilih — portrait, text, HP bar, skill, item
-  bbox: [668, 771, 1058, 163]
+  bbox: [669, 769, 1058, 163]
   type: composite
   portrait:
     description: Icon wajah hero terpilih
-    bbox: [700, 780, 110, 100]
+    bbox: [720, 790, 82, 75]
     type: template
     templates: heroes
   level:
@@ -20,7 +20,7 @@ hero_panel:
     color: green
   mana_bar:
     description: Mana/Energy bar
-    bbox: [1125, 425, 185, 12]
+    bbox: [1095, 417, 185, 12]
     type: bar
     color: blue
   skills:
@@ -31,10 +31,10 @@ hero_panel:
       bbox: [845, 837, 70, 70]
       type: template
     skill_2:
-      bbox: [947, 835, 70, 70]
+      bbox: [949, 839, 70, 70]
       type: template
     skill_3:
-      bbox: [1054, 835, 70, 70]
+      bbox: [1054, 837, 70, 70]
       type: template
     battle_spell:
       bbox: [1206, 848, 59, 59]
@@ -47,7 +47,7 @@ hero_panel:
       bbox: [1305, 850, 59, 59]
       type: template
     item_2:
-      bbox: [1373, 850, 59, 59]
+      bbox: [1372, 849, 59, 59]
       type: template
     item_3:
       bbox: [1443, 851, 59, 59]
@@ -56,7 +56,7 @@ hero_panel:
       bbox: [1512, 850, 59, 59]
       type: template
     item_5:
-      bbox: [1586, 851, 59, 59]
+      bbox: [1583, 850, 59, 59]
       type: template
     item_6:
       bbox: [1653, 850, 59, 59]

@@ -52,8 +52,12 @@ class DetectorManager:
         except Exception as e:
             log.warning("Failed to load heroes.json: %s", e)
 
-        # ── Load hero portrait templates (resize ke ukuran portrait di game) ──
-        pt_w, pt_h = 110, 100  # ukuran portrait region dari layout
+        # ── Load hero portrait templates (resize sesuai ukuran portrait di layout) ──
+        pt_region = layout.get_region("hero_panel", "portrait")
+        if pt_region and "bbox" in pt_region:
+            pt_w, pt_h = pt_region["bbox"][2], pt_region["bbox"][3]  # [x, y, w, h]
+        else:
+            pt_w, pt_h = 110, 100  # fallback
         hero_templates: dict[str, np.ndarray] = {}
         heroes_path = os.path.join(base, "assets", "heroes")
         try:
@@ -68,7 +72,7 @@ class DetectorManager:
         except Exception as e:
             log.warning("Failed to load hero templates: %s", e)
 
-        self._hero_matcher = TemplateMatcher(threshold=0.35, templates=hero_templates)
+        self._hero_matcher = TemplateMatcher(threshold=0.40, templates=hero_templates)
 
         # ── Load item database ──
         self._item_db: dict[str, dict] = {}
@@ -145,22 +149,52 @@ class DetectorManager:
         """Run all detectors on a frame and return status dict."""
         status: dict[str, Any] = {}
 
-        # ── Hero name (template matching portrait, dicache) ──
-        if self._cached_hero_name is None:
+        # ── Hero name ──
+        # Template matching tidak reliable (template full-body vs face portrait in-game).
+        # OCR juga tidak available (PaddleOCR disabled).
+        # Gunakan cached name kalo sudah pernah terdeteksi, otherwise "scanning".
+        if self._cached_hero_name:
+            status["hero_name"] = self._cached_hero_name
+        else:
+            status["hero_name"] = "...scanning"
+        last_log = getattr(self, '_last_scan_log', 0)
+        if not self._cached_hero_name and video_time > 0 and video_time - last_log >= 3:
+            log.info("⏳ Hero masih scanning... (%.0fs)", video_time)
+            self._last_scan_log = video_time
+
+        # ── Deteksi hero via template matching ──
+        if not self._cached_hero_name:
             portrait_img = crop_region(frame, "hero_panel", "portrait")
             if portrait_img is not None and portrait_img.size:
                 match = self._hero_matcher.match(portrait_img)
-                if match and match.success and match.label:
+                if match and match.success and match.confidence > 0.40:
                     entry = self._hero_db.get(match.label)
-                    if entry:
-                        self._cached_hero_name = entry.get("name", match.label)
-                    else:
-                        self._cached_hero_name = match.label.replace("_", " ").title()
-                    log.info("Hero matched: %s (%.0f%%)", self._cached_hero_name, match.confidence * 100)
-        if self._cached_hero_name:
-            status["hero_name"] = self._cached_hero_name
-        elif status.get("skills"):
-            status["hero_name"] = "...scanning"
+                    name = entry.get("name", match.label.replace("_", " ").title()) if entry else match.label.replace("_", " ").title()
+                    self._cached_hero_name = name
+                    status["hero_name"] = name
+                    log.info("✅ Hero: %s (%.0f%%)", name, match.confidence * 100)
+
+        # ── Simpan sample portrait ke .tmp/ (sekali saja, untuk referensi) ──
+        if not getattr(self, '_portrait_saved', False) and video_time > 3:
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            tmp_dir = os.path.join(base_dir, ".tmp")
+            os.makedirs(tmp_dir, exist_ok=True)
+
+            portrait_img = crop_region(frame, "hero_panel", "portrait")
+            if portrait_img is not None and portrait_img.size > 0:
+                gray = cv2.cvtColor(portrait_img, cv2.COLOR_BGR2GRAY)
+                if gray.mean() > 40:
+                    cv2.imwrite(os.path.join(tmp_dir, "hero_portrait_crop.png"), portrait_img)
+                    log.info("📸 Hero portrait saved to .tmp/hero_portrait_crop.png")
+
+                    # Simpan beberapa template pembanding
+                    for h in ["alpha", "lancelot", "tigreal", "franco", "carmilla"]:
+                        tpath = os.path.join(base_dir, "assets", "heroes", f"{h}.png")
+                        if os.path.exists(tpath):
+                            img = cv2.imread(tpath)
+                            cv2.imwrite(os.path.join(tmp_dir, f"template_{h}.png"), cv2.resize(img, (110, 100)))
+
+                    self._portrait_saved = True
 
         # ── Level (Tesseract OCR, karena PaddleOCR mati) ──
         lvl_img = crop_region(frame, "hero_panel", "level")
@@ -211,6 +245,33 @@ class DetectorManager:
             if result and result.value is not None:
                 status["gold"] = result.value
 
+        # ── Items + CDR (SEBELUM skills, biar _cdr up-to-date) ──
+        self._cdr = 0.0
+        if self._item_matcher is not None:
+            item_names: list[str] = []
+            total_cdr = 0
+            for item_slot in ("item_1", "item_2", "item_3", "item_4", "item_5", "item_6"):
+                item_img = crop_region(frame, "hero_panel", "items", item_slot)
+                if item_img is not None and item_img.size:
+                    gray = cv2.cvtColor(item_img, cv2.COLOR_BGR2GRAY)
+                    if gray.mean() < 30 or gray.std() < 28:
+                        continue
+                    match = self._item_matcher.match(item_img)
+                    if match and match.success and match.label:
+                        entry = self._item_db.get(match.label)
+                        if entry:
+                            name = entry.get("name", match.label)
+                            total_cdr += entry.get("attributes", {}).get("cooldown_reduction", 0)
+                        else:
+                            name = match.label.replace("_", " ").title()
+                        item_names.append(name)
+            if item_names:
+                status["items"] = item_names
+                self._cdr = min(total_cdr / 100.0, 0.40)
+                if total_cdr > 0:
+                    log.info("Items: %s | CDR: %d%%", ", ".join(item_names[:4]), round(self._cdr * 100))
+        status["cdr_pct"] = round(self._cdr * 100, 0)
+
         # ── Skills ──
         skills_status: dict[str, dict] = {}
         for skill_name in ("passive", "skill_1", "skill_2", "skill_3", "battle_spell"):
@@ -251,32 +312,6 @@ class DetectorManager:
                 skills_status[skill_name] = skill_info
         if skills_status:
             status["skills"] = skills_status
-
-        # ── Items (template matching + CDR) ──
-        if self._item_matcher is not None:
-            item_names: list[str] = []
-            total_cdr = 0
-            for item_slot in ("item_1", "item_2", "item_3", "item_4", "item_5", "item_6"):
-                item_img = crop_region(frame, "hero_panel", "items", item_slot)
-                if item_img is not None and item_img.size:
-                    gray = cv2.cvtColor(item_img, cv2.COLOR_BGR2GRAY)
-                    if gray.mean() < 30 or gray.std() < 28:
-                        continue
-                    match = self._item_matcher.match(item_img)
-                    if match and match.success and match.label:
-                        entry = self._item_db.get(match.label)
-                        if entry:
-                            name = entry.get("name", match.label)
-                            total_cdr += entry.get("attributes", {}).get("cooldown_reduction", 0)
-                        else:
-                            name = match.label.replace("_", " ").title()
-                        item_names.append(name)
-                        log.debug("Item %s: %s (%.0f%%)", item_slot, name, match.confidence * 100)
-            if item_names:
-                status["items"] = item_names
-                # Cap CDR at 40% (MLBB max dari item)
-                self._cdr = min(total_cdr / 100.0, 0.40)
-                log.debug("Items: %s | CDR: %.0f%%", ", ".join(item_names), total_cdr)
 
         return status
 
@@ -601,6 +636,9 @@ def draw_status_overlay(frame: np.ndarray, status: dict[str, Any]):
         lines.append((f"KDA:   {status['kda']}", (200, 255, 200)))
     if status.get("gold") is not None:
         lines.append((f"Gold:  {status['gold']}", (255, 255, 100)))
+    cdr = status.get("cdr_pct")
+    if cdr is not None and cdr > 0:
+        lines.append((f"CDR:   {cdr:.0f}%", (100, 200, 255)))
 
     # Skills
     skills = status.get("skills", {})
@@ -1060,6 +1098,7 @@ def main():
                 detector_mgr._cd_ref_brightness.clear()
             detector_mgr._cached_spell_key = None
             detector_mgr._cached_spell_cd = None
+            detector_mgr._cached_hero_name = None
             with vision_status_lock:
                 vision_status.clear()
             frame_count = 0
