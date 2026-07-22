@@ -37,7 +37,7 @@ hero_panel:
       bbox: [1054, 835, 70, 70]
       type: template
     battle_spell:
-      bbox: [1205, 850, 59, 59]
+      bbox: [1206, 848, 59, 59]
       type: template
   items:
     description: Item hero — 6 slot sejajar dengan spell
