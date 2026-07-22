@@ -74,25 +74,30 @@ def main():
     print(f"   Images: {len(list(Path('trainings/hero_detector/images/train').glob('*.png')))} train, "
           f"{len(list(Path('trainings/hero_detector/images/val').glob('*.png')))} val")
 
+    # Lower learning rate and specialized augmentation for minimap icons fine-tuning
+    lr = 0.001 if prev_model else 0.005
+
     results = model.train(
         data="trainings/hero_detector/data.yaml",
-        epochs=150,
-        imgsz=320,
+        epochs=100,
+        imgsz=352,             # Closer to original minimap crop size (350x340)
         batch=16,
-        lr0=0.005,           # lower LR for fine-tuning
-        augment=True,
-        patience=30,
+        lr0=lr,                # Lower initial LR for fine-tuning
+        lrf=0.01,
+        hsv_h=0.0,             # CRITICAL: Disable hue shift so blue vs red hero colors are not distorted
+        hsv_s=0.1,             # Mild saturation variation
+        hsv_v=0.1,             # Mild brightness variation
+        mosaic=0.0,            # Disable mosaic to prevent tiny hero icons from being cropped/destroyed
+        patience=25,
         device=device,
         project="trainings/hero_detector",
         name="yolo11n_minimap",
         exist_ok=True,
         workers=4,
-        close_mosaic=10,
-        resume=False,         # auto-resume not needed (we load weights manually)
     )
 
     # Export
-    model.export(format="onnx", imgsz=320)
+    model.export(format="onnx", imgsz=352)
     model_path = "trainings/hero_detector/yolo11n_minimap/weights/best.pt"
     print(f"\n✅ Model: {model_path}")
     print(f"   ONNX:  trainings/hero_detector/yolo11n_minimap/weights/best.onnx")

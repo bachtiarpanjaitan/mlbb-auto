@@ -21,14 +21,18 @@ done
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-# Copy ke validation set (20% data)
+# Split validation set (20% data, terpisah murni tanpa kebohongan leakage)
 mkdir -p trainings/hero_detector/images/val trainings/hero_detector/labels/val
-rm -f trainings/hero_detector/images/val/* trainings/hero_detector/labels/val/*
 
+# Reset: kembalikan file val lama ke train terlebih dahulu jika ada
+mv trainings/hero_detector/labels/val/*.txt trainings/hero_detector/labels/train/ 2>/dev/null || true
+mv trainings/hero_detector/images/val/*.png trainings/hero_detector/images/train/ 2>/dev/null || true
+
+# Pindahkan 20% data secara acak dari train ke val
 ls trainings/hero_detector/labels/train/*.txt 2>/dev/null | shuf | head -$(( $(ls trainings/hero_detector/labels/train/*.txt 2>/dev/null | wc -l) / 5 )) | while read f; do
     base=$(basename "$f" .txt)
-    cp "trainings/hero_detector/labels/train/${base}.txt" "trainings/hero_detector/labels/val/" 2>/dev/null || true
-    cp "trainings/hero_detector/images/train/${base}.png" "trainings/hero_detector/images/val/" 2>/dev/null || true
+    mv "trainings/hero_detector/labels/train/${base}.txt" "trainings/hero_detector/labels/val/" 2>/dev/null || true
+    mv "trainings/hero_detector/images/train/${base}.png" "trainings/hero_detector/images/val/" 2>/dev/null || true
 done
 
 echo "Val set: $(ls trainings/hero_detector/images/val/*.png 2>/dev/null | wc -l) images"

@@ -152,19 +152,24 @@ def main():
                     _label_mode[0] = 1
                     print("  Mode: RED")
                 elif k == ord('n'):
-                    cv2.imwrite(str(DATASET_DIR / "images" / "train" / img_name), mm)
-                    save_labels(img_name, boxes)
-                    saved_count += 1
                     if boxes:
-                        print(f"  Saved {img_name} ({len(boxes)} labels)")
+                        cv2.imwrite(str(DATASET_DIR / "images" / "train" / img_name), mm)
+                        save_labels(img_name, boxes)
+                        saved_count += 1
+                        print(f"  ✅ Saved {img_name} ({len(boxes)} labels)")
+                    else:
+                        print(f"  ⏭️  Skipped frame {frame_idx} (no labels)")
                     frame_idx += 30  # 1 detik (30fps)
                     cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
                     break
                 elif k == ord('s'):
-                    cv2.imwrite(str(DATASET_DIR / "images" / "train" / img_name), mm)
-                    save_labels(img_name, boxes)
-                    saved_count += 1
-                    print(f"  ✅ Saved {img_name} ({len(boxes)} labels)")
+                    if boxes:
+                        cv2.imwrite(str(DATASET_DIR / "images" / "train" / img_name), mm)
+                        save_labels(img_name, boxes)
+                        saved_count += 1
+                        print(f"  ✅ Saved {img_name} ({len(boxes)} labels)")
+                    else:
+                        print(f"  ⏭️  Skipped frame {frame_idx} (tanpa label)")
                     break
 
                 elif k == ord('q'):
@@ -181,8 +186,13 @@ def main():
 
 
 def save_labels(img_name: str, boxes: list):
-    """Save YOLO format labels (normalized cx, cy, w, h)."""
+    """Save YOLO format labels (normalized cx, cy, w, h). Only saves if boxes is not empty."""
     label_path = DATASET_DIR / "labels" / "train" / f"{Path(img_name).stem}.txt"
+    if not boxes:
+        if label_path.exists():
+            label_path.unlink()
+        return False
+
     lines = []
     for cls, cx, cy, w, h in boxes:
         nx = cx / IMG_W
@@ -190,7 +200,8 @@ def save_labels(img_name: str, boxes: list):
         nw = w / IMG_W
         nh = h / IMG_H
         lines.append(f"{cls} {nx:.6f} {ny:.6f} {nw:.6f} {nh:.6f}")
-    label_path.write_text("\n".join(lines) + "\n" if lines else "")
+    label_path.write_text("\n".join(lines) + "\n")
+    return True
 
 
 if __name__ == "__main__":
