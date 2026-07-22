@@ -26,10 +26,23 @@ def main():
     ap = argparse.ArgumentParser(description="Label hero dots on minimap")
     ap.add_argument("--video", "-v", type=str, default=None,
                     help="Video file name in videos/ (e.g. alpha_1.mp4)")
+    ap.add_argument("--split", "-s", type=str, choices=["train", "val", "sample"], default=None,
+                    help="Target dataset split: 'train' or 'val'/'sample'")
     args = ap.parse_args()
 
-    os.makedirs(DATASET_DIR / "images" / "train", exist_ok=True)
-    os.makedirs(DATASET_DIR / "labels" / "train", exist_ok=True)
+    if args.split:
+        target_split = "val" if args.split in ["val", "sample"] else "train"
+    else:
+        print("\n📌 Pilih folder tujuan penyimpanan dataset:")
+        print("  [1] Train  (trainings/hero_detector/images/train)")
+        print("  [2] Val / Sample (trainings/hero_detector/images/val)")
+        choice = input("Pilihan [1/2] (default: 1): ").strip()
+        target_split = "val" if choice in ["2", "val", "sample"] else "train"
+
+    split_label = "VAL (SAMPLE)" if target_split == "val" else "TRAIN"
+
+    os.makedirs(DATASET_DIR / "images" / target_split, exist_ok=True)
+    os.makedirs(DATASET_DIR / "labels" / target_split, exist_ok=True)
 
     if args.video:
         video_path = VIDEO_DIR / args.video
@@ -45,11 +58,12 @@ def main():
             return
 
     print("=== 🏷️  MLBB Minimap Hero Labeling Tool ===")
+    print(f"  Target Split: 🎯 {split_label}")
     print("  Left click  = blue_hero")
     print("  Right click = red_hero")
-    print("  N = next frame (auto-save) | S = save + next | Q = quit")
+    print("  N = next frame (+1s) | S = save + next | U = undo | Q = quit")
     print(f"  Videos: {[v.name for v in video_files]}")
-    print(f"  Output: {DATASET_DIR.absolute()}/")
+    print(f"  Output: {DATASET_DIR.absolute()}/[images|labels]/{target_split}/")
     print("━" * 50)
 
     for vid in video_files:
@@ -84,9 +98,6 @@ def main():
                 break
 
             mm = crop_region(frame, "map")
-
-            # Show this frame, then jump 5 seconds on 'n'/'s'
-            pass
 
             if mm is None or mm.shape != (IMG_H, IMG_W, 3):
                 print(f"  ⚠️  Frame {frame_idx}: minimap crop failed ({mm.shape if mm is not None else 'None'})")
@@ -125,8 +136,8 @@ def main():
                 canvas[:IMG_H * 2, :] = vis_map
 
                 # Top overlay info
-                cv2.putText(canvas, f"Frame {idx} - {name}  [{len(bx)} dots]",
-                            (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                cv2.putText(canvas, f"[{split_label}] Frame {idx} - {name}  [{len(bx)} dots]",
+                            (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 0) if target_split == "val" else (255, 255, 255), 2)
                 cv2.putText(canvas, "[N]ext (+1s) [S]ave+Next [U]ndo [Q]uit",
                             (10, 55), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 1)
                 mode_text = "BLUE" if _label_mode[0] == 0 else "RED"
@@ -194,10 +205,10 @@ def main():
                         print(f"  ↩️  Undo: removed {label} dot")
                 elif k == ord('n'):
                     if boxes:
-                        cv2.imwrite(str(DATASET_DIR / "images" / "train" / img_name), mm)
-                        save_labels(img_name, boxes)
+                        cv2.imwrite(str(DATASET_DIR / "images" / target_split / img_name), mm)
+                        save_labels(img_name, boxes, target_split)
                         saved_count += 1
-                        print(f"  ✅ Saved {img_name} ({len(boxes)} labels)")
+                        print(f"  ✅ Saved to [{target_split}] {img_name} ({len(boxes)} labels)")
                     else:
                         print(f"  ⏭️  Skipped frame {frame_idx} (no labels)")
                     frame_idx += 30  # 1 detik (30fps)
@@ -205,17 +216,17 @@ def main():
                     break
                 elif k == ord('s'):
                     if boxes:
-                        cv2.imwrite(str(DATASET_DIR / "images" / "train" / img_name), mm)
-                        save_labels(img_name, boxes)
+                        cv2.imwrite(str(DATASET_DIR / "images" / target_split / img_name), mm)
+                        save_labels(img_name, boxes, target_split)
                         saved_count += 1
-                        print(f"  ✅ Saved {img_name} ({len(boxes)} labels)")
+                        print(f"  ✅ Saved to [{target_split}] {img_name} ({len(boxes)} labels)")
                     else:
                         print(f"  ⏭️  Skipped frame {frame_idx} (tanpa label)")
                     break
 
                 elif k == ord('q'):
                     cv2.destroyAllWindows()
-                    print(f"\nDone! {saved_count} frames labeled.")
+                    print(f"\nDone! {saved_count} frames labeled for [{target_split}].")
                     print(f"Dataset: {DATASET_DIR.absolute()}/")
                     return
 
@@ -226,9 +237,9 @@ def main():
     print("   Run: python tools/train_yolo.py")
 
 
-def save_labels(img_name: str, boxes: list):
+def save_labels(img_name: str, boxes: list, split: str = "train"):
     """Save YOLO format labels (normalized cx, cy, w, h). Only saves if boxes is not empty."""
-    label_path = DATASET_DIR / "labels" / "train" / f"{Path(img_name).stem}.txt"
+    label_path = DATASET_DIR / "labels" / split / f"{Path(img_name).stem}.txt"
     if not boxes:
         if label_path.exists():
             label_path.unlink()
