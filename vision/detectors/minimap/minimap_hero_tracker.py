@@ -39,6 +39,7 @@ logger = logging.getLogger("mlbb.vision.minimap_hero")
 # ── Default assets path ──
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 _HEROES_ASSET_DIR = _PROJECT_ROOT / "assets" / "heroes"
+_CREEPS_ASSET_DIR = _PROJECT_ROOT / "assets" / "creeps_minimap"
 
 # ── Default HSV ranges untuk fallback blue/red team dots ──
 BLUE_HUE_CENTER = 100
@@ -216,6 +217,10 @@ class MinimapHeroTracker:
         self._tracked: dict[str, TrackedMinimapHero] = {}  # name -> hero
         self._unknown_count: int = 0
 
+        # Tracked jungle objectives (separate from heroes)
+        self._tracked_jungle: dict[str, TrackedMinimapHero] = {}  # key -> jungle obj
+        self._jungle_counter: int = 0
+
         # Roster dari TeamDetector
         self._roster: dict[str, str] = {}  # hero_name -> team
         self._roster_unassigned: set[str] = set()
@@ -237,6 +242,11 @@ class MinimapHeroTracker:
         # Load asset portraits
         self._heroes_asset_dir = Path(heroes_asset_dir) if heroes_asset_dir else _HEROES_ASSET_DIR
         self._load_asset_portraits()
+
+        # Load creep/jungle minimap icon templates
+        self._creeps_asset_dir = _CREEPS_ASSET_DIR
+        self._creep_templates: dict[str, list[np.ndarray]] = {}
+        self._load_creep_templates()
 
         # Coordinate mapper
         self._mapper: CoordinateMapper | None = None
@@ -309,6 +319,76 @@ class MinimapHeroTracker:
         logger.info(
             "Loaded %d hero portraits from %s", count, self._heroes_asset_dir,
         )
+
+    def _load_creep_templates(self):
+        """
+        Load creep minimap icon templates dari assets/creeps_minimap/ directory.
+        """
+        if not self._creeps_asset_dir.is_dir():
+            logger.debug("Creeps asset dir not found: %s", self._creeps_asset_dir)
+            return
+
+        count = 0
+        extensions = ("*.png", "*.jpg", "*.jpeg")
+        fpaths = []
+        for ext in extensions:
+            fpaths.extend(self._creeps_asset_dir.glob(ext))
+
+        for fpath in sorted(fpaths):
+            name = fpath.stem.lower()
+            img = cv2.imread(str(fpath), cv2.IMREAD_GRAYSCALE)
+            if img is None or img.size == 0:
+                continue
+
+            tmpls = []
+            for sz in (16, 20, 24, 28):
+                resized = cv2.resize(img, (sz, sz), interpolation=cv2.INTER_AREA)
+                tmpls.append(resized)
+
+            self._creep_templates[name] = tmpls
+            count += 1
+
+        if count > 0:
+            logger.info("Loaded %d creep minimap icon templates from %s", count, self._creeps_asset_dir)
+
+    def _identify_creep(self, minimap_img: np.ndarray | None, cx: int, cy: int) -> tuple[str, float]:
+        """
+        Identifikasi jenis creep (turtle, lord, thunder_fenrir, molten_fiend, crab, lithowanderer, dll)
+        menggunakan template matching pada assets/creeps_minimap/.
+        """
+        if minimap_img is None or not self._creep_templates:
+            return "jungle", 0.5
+
+        h, w = minimap_img.shape[:2]
+        gray = cv2.cvtColor(minimap_img, cv2.COLOR_BGR2GRAY) if minimap_img.ndim == 3 else minimap_img
+
+        half = 16
+        px1, py1 = max(0, cx - half), max(0, cy - half)
+        px2, py2 = min(w, cx + half), min(h, cy + half)
+        patch = gray[py1:py2, px1:px2]
+        ph, pw = patch.shape[:2]
+
+        if ph < 8 or pw < 8:
+            return "jungle", 0.5
+
+        best_name = "jungle"
+        best_score = 0.0
+
+        for creep_name, tmpls in self._creep_templates.items():
+            for tmpl in tmpls:
+                th, tw = tmpl.shape[:2]
+                if ph < th or pw < tw:
+                    continue
+                res = cv2.matchTemplate(patch, tmpl, cv2.TM_CCOEFF_NORMED)
+                val = float(np.max(res)) if res.size > 0 else 0.0
+                if val > best_score:
+                    best_score = val
+                    best_name = creep_name
+
+        if best_score >= self.match_threshold * 0.7:
+            return best_name, round(best_score, 3)
+
+        return "jungle", max(0.5, round(best_score, 3))
 
     def _prepare_circular_templates(
         self, portrait: np.ndarray,
@@ -1026,6 +1106,86 @@ class MinimapHeroTracker:
 
         return matched
 
+    def _update_jungle_tracking(
+        self,
+        jungle_dots: list[tuple[str, int, int, int]],
+        frame_idx: int,
+        minimap_img: np.ndarray | None = None,
+    ):
+        """
+        Track jungle objectives (turtle, lord, buffs, crab) dan cocokkan ikonnya
+        dengan template dari assets/creeps_minimap/.
+        """
+        matched_keys: set[str] = set()
+
+        # NN match existing tracked jungle to new dots
+        for key, jobj in list(self._tracked_jungle.items()):
+            best_dist = 0.08  # threshold normalized distance
+            best_idx = -1
+            for i, (_, cx, cy, r) in enumerate(jungle_dots):
+                nx = cx / max(1, self._mm_w)
+                ny = cy / max(1, self._mm_h)
+                dist = ((nx - jobj.norm_x) ** 2 + (ny - jobj.norm_y) ** 2) ** 0.5
+                if dist < best_dist:
+                    best_dist = dist
+                    best_idx = i
+
+            if best_idx >= 0:
+                _, cx, cy, r = jungle_dots[best_idx]
+                nx = cx / max(1, self._mm_w)
+                ny = cy / max(1, self._mm_h)
+                jobj.smooth_position(nx, ny)
+                jobj.last_seen_frame = frame_idx
+                jobj.frames_alive += 1
+                jobj.miss_count = 0
+
+                # Re-verify/identify creep identity if currently generic
+                if jobj.name is None or jobj.name.startswith("jungle") or jobj.confidence < 0.6:
+                    c_name, c_conf = self._identify_creep(minimap_img, cx, cy)
+                    if c_name != "jungle":
+                        jobj.name = c_name
+                        jobj.confidence = c_conf
+                matched_keys.add(key)
+
+        # New jungle dots → create tracked entries
+        for _, cx, cy, r in jungle_dots:
+            nx = cx / max(1, self._mm_w)
+            ny = cy / max(1, self._mm_h)
+            # Check if already matched to existing
+            already = False
+            for key in matched_keys:
+                jobj = self._tracked_jungle.get(key)
+                if jobj and ((nx - jobj.norm_x) ** 2 + (ny - jobj.norm_y) ** 2) ** 0.5 < 0.06:
+                    already = True
+                    break
+            if already:
+                continue
+
+            c_name, c_conf = self._identify_creep(minimap_img, cx, cy)
+            if c_name == "jungle":
+                self._jungle_counter += 1
+                name = f"jungle_{self._jungle_counter}"
+            else:
+                name = c_name
+
+            jobj = TrackedMinimapHero(
+                name=name, team="jungle",
+                norm_x=nx, norm_y=ny,
+                last_seen_frame=frame_idx,
+                first_seen_frame=frame_idx,
+                frames_alive=1, confidence=c_conf,
+                smooth_alpha=0.4,
+            )
+            self._tracked_jungle[name] = jobj
+
+        # Increment miss + cleanup dead jungle objectives (shorter timeout)
+        for key, jobj in list(self._tracked_jungle.items()):
+            if key not in matched_keys:
+                jobj.miss_count += 1
+        dead = [k for k, j in self._tracked_jungle.items() if j.miss_count >= 3]
+        for k in dead:
+            del self._tracked_jungle[k]
+
     def update(
         self,
         minimap_img: np.ndarray,
@@ -1052,8 +1212,16 @@ class MinimapHeroTracker:
         self._current_frame = frame_idx
 
         # ── 1. Fast: HoughCircles + border color (geometric only) ──
-        all_dots = self._detect_circles_fast(minimap_img)  # [(team, cx, cy, r), ...]
+        raw_dots = self._detect_circles_fast(minimap_img)  # [(team, cx, cy, r), ...]
+
+        # Separate jungle dots from hero dots
+        all_dots = [(t, cx, cy, r) for t, cx, cy, r in raw_dots if t != "jungle"]
+        jungle_dots = [(t, cx, cy, r) for t, cx, cy, r in raw_dots if t == "jungle"]
+
         self._last_circles = [(cx, cy, r) for _, cx, cy, r in all_dots]
+
+        # ── Track jungle objectives (simple position tracking + creep template matching) ──
+        self._update_jungle_tracking(jungle_dots, frame_idx, minimap_img)
 
         # ── Motion filter: reject static terrain via position variance ──
         self._pos_history_frames += 1
@@ -1234,6 +1402,7 @@ class MinimapHeroTracker:
 
         blue_dots = [(cx, cy) for t, cx, cy, r in all_dots if t == "blue"]
         red_dots = [(cx, cy) for t, cx, cy, r in all_dots if t == "red"]
+        jungle_dots_debug = [(cx, cy) for t, cx, cy, r in jungle_dots]
 
         for h in self._tracked.values():
             if h.miss_count < self.max_miss_frames:
@@ -1243,6 +1412,13 @@ class MinimapHeroTracker:
                 elif h.team == "red" and (px, py) not in red_dots:
                     red_dots.append((px, py))
 
+        # Add tracked jungle positions to debug
+        for j in self._tracked_jungle.values():
+            if j.miss_count < self.max_miss_frames:
+                px, py = int(j.norm_x * ww), int(j.norm_y * hh)
+                if (px, py) not in jungle_dots_debug:
+                    jungle_dots_debug.append((px, py))
+
         bm = np.zeros((hh, ww), dtype=np.uint8)
         rm = np.zeros((hh, ww), dtype=np.uint8)
         for cx, cy in blue_dots: cv2.circle(bm, (cx, cy), 8, 255, -1)
@@ -1250,11 +1426,17 @@ class MinimapHeroTracker:
 
         self._last_debug = dict(minimap_img=minimap_img, portrait_matches=[], matched_names=list(matched_names),
             tracked_count=len(self._tracked), dead_heroes=dead, blue_dots=blue_dots, red_dots=red_dots,
+            jungle_dots=jungle_dots_debug,
             blue_mask=bm, red_mask=rm, blue_all_cnt=self._last_circles)
 
-        # ── 9. Result ──
-        return [h.to_minimap_hero(frame_idx, self._mapper, self._mm_w, self._mm_h)
-                for h in self._tracked.values() if h.miss_count < self.max_miss_frames]
+        # ── 9. Result (heroes + jungle) ──
+        result = [h.to_minimap_hero(frame_idx, self._mapper, self._mm_w, self._mm_h)
+                  for h in self._tracked.values() if h.miss_count < self.max_miss_frames]
+        result.extend(
+            j.to_minimap_hero(frame_idx, self._mapper, self._mm_w, self._mm_h)
+            for j in self._tracked_jungle.values() if j.miss_count < self.max_miss_frames
+        )
+        return result
 
     # ── Query Methods ────────────────────────────────────────────────
 
@@ -1285,6 +1467,16 @@ class MinimapHeroTracker:
             )
             for h in self._tracked.values()
             if h.team == team and h.miss_count < self.max_miss_frames
+        ]
+
+    def get_jungle_positions(self) -> list[MinimapHero]:
+        """Get positions of all currently visible jungle objectives."""
+        return [
+            j.to_minimap_hero(
+                self._current_frame, self._mapper, self._mm_w, self._mm_h,
+            )
+            for j in self._tracked_jungle.values()
+            if j.miss_count < self.max_miss_frames
         ]
 
     def get_last_debug_data(self) -> dict | None:

@@ -1,6 +1,6 @@
 #!/bin/bash
-# Label Minimap Heroes — MLBB Hero Detection Dataset
-# Klik kiri = blue_hero, klik kanan = red_hero
+# Label Minimap — MLBB Hero & Jungle Detection Dataset
+# B = blue_hero, R = red_hero, J = jungle
 # N = next frame, S = save & next, Q = quit
 
 set -e

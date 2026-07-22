@@ -57,6 +57,17 @@ class DetectorManager:
         except Exception as e:
             log.warning("Failed to load heroes.json: %s", e)
 
+        # ── Load creeps/jungle database ──
+        self._creep_db: dict[str, dict] = {}
+        creep_db_path = os.path.join(base, "assets", "databases", "creeps.json")
+        try:
+            with open(creep_db_path) as f:
+                for creep in json.load(f):
+                    self._creep_db[creep["key"]] = creep
+            log.info("Loaded %d creeps from database", len(self._creep_db))
+        except Exception as e:
+            log.warning("Failed to load creeps.json: %s", e)
+
         # ── Load hero portrait templates (resize sesuai ukuran portrait di layout) ──
         pt_region = layout.get_region("hero_panel", "portrait")
         if pt_region and "bbox" in pt_region:
@@ -861,10 +872,17 @@ def draw_minimap_debug(frame: np.ndarray, status: dict[str, Any],
         cv2.circle(frame, (px, py), 5, (0, 100, 255), -1)
         cv2.circle(frame, (px, py), 9, (0, 100, 255), 2)
 
+    # ── Draw jungle dots (green) ──
+    jungle_dots = debug.get("jungle_dots", [])
+    for dx, dy in jungle_dots:
+        px, py = mm_x + dx, mm_y + dy
+        cv2.circle(frame, (px, py), 5, (0, 200, 0), -1)
+        cv2.circle(frame, (px, py), 9, (0, 200, 0), 2)
+
     # Label
     cv2.putText(frame, "HOUGH CIRCLES", (mm_x + 2, mm_y + 14),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 255, 255), 1, cv2.LINE_AA)
-    cv2.putText(frame, f"B:{len(blue_dots)} R:{len(red_dots)} C:{len(all_circles)}",
+    cv2.putText(frame, f"B:{len(blue_dots)} R:{len(red_dots)} J:{len(jungle_dots)} C:{len(all_circles)}",
                 (mm_x + 2, mm_y + mm_h - 4),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.35, (255, 255, 255), 1, cv2.LINE_AA)
 
@@ -901,9 +919,15 @@ def draw_minimap_heroes(frame: np.ndarray, status: dict[str, Any],
         if team == "blue":
             outer_color = (255, 140, 60)
             fill_color = (220, 80, 30)
-        else:
+        elif team == "red":
             outer_color = (60, 60, 255)
             fill_color = (30, 30, 200)
+        elif team == "jungle":
+            outer_color = (60, 220, 60)
+            fill_color = (30, 180, 30)
+        else:
+            outer_color = (180, 180, 180)
+            fill_color = (120, 120, 120)
 
         # Dot + glow
         cv2.circle(frame, (px, py), glow_r, outer_color, thick_circle)
@@ -911,7 +935,10 @@ def draw_minimap_heroes(frame: np.ndarray, status: dict[str, Any],
         cv2.circle(frame, (px, py), max(2, dot_r // 2), (255, 255, 255), -1)
 
         # Label (readable font & clear padding)
-        label = name[:10]
+        if team == "jungle":
+            label = name if (name and not name.startswith("jungle")) else "jungle"
+        else:
+            label = name[:10]
         extra = f" ({conf:.0%})" if conf < 0.8 else ""
         text = f"{label}{extra}"
 
@@ -969,6 +996,25 @@ def draw_minimap_hero_overlay(frame: np.ndarray, status: dict[str, Any]):
                         text += f" @{loc}"
 
                     lines.append((text, conf_color))
+
+        # Jungle objectives
+        jungle_heroes = [e for e in mm_heroes if e["team"] == "jungle"]
+        if jungle_heroes:
+            lines.append((f"  [JUNGLE] {len(jungle_heroes)} visible", (100, 255, 100)))
+            for entry in jungle_heroes:
+                c_name = entry.get("name") or "jungle"
+                if c_name.startswith("jungle_"):
+                    c_name = "jungle"
+                gx, gy = entry.get("game_x"), entry.get("game_y")
+                loc = entry.get("nearest") or entry.get("lane") or ""
+                conf = entry.get("confidence", 0)
+                if gx is not None and gy is not None:
+                    text = f"  {c_name}: ({gx:.0f}, {gy:.0f})"
+                else:
+                    text = f"  {c_name}: ({entry['norm_x']:.2f}, {entry['norm_y']:.2f})"
+                if loc:
+                    text += f" @{loc}"
+                lines.append((text, (100, 255, 100)))
     else:
         lines.append(("  (waiting for detection)", (180, 180, 180)))
 
@@ -1587,7 +1633,8 @@ def main():
             if dd:
                 current_status["_mm_debug"] = {"blue_mask": dd.get("blue_mask"),
                     "red_mask": dd.get("red_mask"), "blue_dots": dd.get("blue_dots", []),
-                    "red_dots": dd.get("red_dots", [])}
+                    "red_dots": dd.get("red_dots", []),
+                    "jungle_dots": dd.get("jungle_dots", [])}
 
         # ── Sync HP tracker → merge HP untuk blue + red ──
         hp_tracker.sync_frame(frame_count)

@@ -1,6 +1,7 @@
 """
 Labeling Tool — MLBB Minimap Hero Detection
-Klik kiri = blue hero, klik kanan = red hero.
+Klik kiri = label dengan mode aktif, klik kanan = red hero (shortcut).
+Tekan B = blue_hero, R = red_hero, J = jungle.
 Tekan N = next frame tanpa save, S = save & next, Q = quit.
 """
 
@@ -19,6 +20,18 @@ VIDEO_DIR = Path("videos")
 IMG_W, IMG_H = 350, 340
 HERO_DOT_SIZE = 34  # Ukuran lingkaran dot hero lebih pas/presisi (34px)
 
+# Class definitions
+CLASS_NAMES = {0: "BLUE", 1: "RED", 2: "JUNGLE"}
+CLASS_COLORS = {
+    0: (255, 180, 30),   # biru (BGR)
+    1: (30, 30, 255),    # merah (BGR)
+    2: (50, 220, 50),    # hijau (BGR)
+}
+CLASS_KEYS = {
+    ord('b'): 0,  # blue_hero
+    ord('r'): 1,  # red_hero
+    ord('j'): 2,  # jungle
+}
 
 
 def main():
@@ -57,10 +70,11 @@ def main():
             print(f"   Place video files in videos/ directory")
             return
 
-    print("=== 🏷️  MLBB Minimap Hero Labeling Tool ===")
+    print("=== 🏷️  MLBB Minimap Labeling Tool ===")
     print(f"  Target Split: 🎯 {split_label}")
-    print("  Left click  = blue_hero")
-    print("  Right click = red_hero")
+    print("  Klik Kiri   = label mode aktif")
+    print("  Klik Kanan  = red_hero (shortcut)")
+    print("  B = blue_hero | R = red_hero | J = jungle")
     print("  N = next frame (+1s) | S = save + next | U = undo | Q = quit")
     print(f"  Videos: {[v.name for v in video_files]}")
     print(f"  Output: {DATASET_DIR.absolute()}/[images|labels]/{target_split}/")
@@ -121,16 +135,12 @@ def main():
                     center_x = int(cx * 2)
                     center_y = int(cy * 2)
                     radius = int((w / 2) * 2)  # radius dalam skala visual (2x)
-                    if cls == 0:
-                        box_color = (255, 180, 30)  # biru (B=255)
-                        text = "BLUE"
-                    else:
-                        box_color = (30, 30, 255)   # merah (R=255)
-                        text = "RED"
+                    box_color = CLASS_COLORS.get(cls, (200, 200, 200))
+                    text = CLASS_NAMES.get(cls, f"CLS_{cls}")
                     cv2.circle(vis_map, (center_x, center_y), radius, box_color, 3)
                     cv2.circle(vis_map, (center_x, center_y), 3, (255, 255, 255), -1)
-                    cv2.rectangle(vis_map, (center_x - 25, center_y - radius - 20), (center_x + 25, center_y - radius), (0, 0, 0), -1)
-                    cv2.putText(vis_map, text, (center_x - 20, center_y - radius - 5),
+                    cv2.rectangle(vis_map, (center_x - 35, center_y - radius - 20), (center_x + 35, center_y - radius), (0, 0, 0), -1)
+                    cv2.putText(vis_map, text, (center_x - 30, center_y - radius - 5),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.55, box_color, 3)
 
                 canvas[:IMG_H * 2, :] = vis_map
@@ -140,9 +150,12 @@ def main():
                             (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 0) if target_split == "val" else (255, 255, 255), 2)
                 cv2.putText(canvas, "[N]ext (+1s) [S]ave+Next [U]ndo [Q]uit",
                             (10, 55), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 1)
-                mode_text = "BLUE" if _label_mode[0] == 0 else "RED"
-                mode_color = (255, 180, 30) if _label_mode[0] == 0 else (30, 30, 255)
-                cv2.putText(canvas, f"Left-Click/B/R: Mode: {mode_text} | Right-Click: RED", (10, 80),
+
+                # Mode display
+                mode_cls = _label_mode[0]
+                mode_text = CLASS_NAMES.get(mode_cls, f"CLS_{mode_cls}")
+                mode_color = CLASS_COLORS.get(mode_cls, (200, 200, 200))
+                cv2.putText(canvas, f"Mode: {mode_text} | [B]lue [R]ed [J]ungle | RClick=RED", (10, 80),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, mode_color, 2)
 
                 # Separator line
@@ -165,7 +178,7 @@ def main():
 
                 return canvas
 
-            _label_mode = [0]  # [0]=BLUE, [1]=RED
+            _label_mode = [0]  # [0]=BLUE, [1]=RED, [2]=JUNGLE
 
             def mouse_cb(event, x, y, flags, param):
                 nonlocal boxes
@@ -175,33 +188,32 @@ def main():
 
                 if event == cv2.EVENT_LBUTTONDOWN:
                     cls = _label_mode[0]
-                    label = "BLUE" if cls == 0 else "RED"
+                    label = CLASS_NAMES.get(cls, f"CLS_{cls}")
                     boxes.append((cls, x / 2, y / 2, HERO_DOT_SIZE, HERO_DOT_SIZE))
-                    print(f"    {label:4s} at ({x//2:3d}, {y//2:3d})")
+                    print(f"    {label:7s} at ({x//2:3d}, {y//2:3d})")
                 elif event == cv2.EVENT_RBUTTONDOWN:
-                    cls = 1
+                    cls = 1  # shortcut: right click = red_hero
                     boxes.append((cls, x / 2, y / 2, HERO_DOT_SIZE, HERO_DOT_SIZE))
-                    print(f"    RED  at ({x//2:3d}, {y//2:3d})")
+                    print(f"    RED     at ({x//2:3d}, {y//2:3d})")
 
-            cv2.namedWindow("Label Minimap Heroes", cv2.WINDOW_NORMAL)
-            cv2.resizeWindow("Label Minimap Heroes", IMG_W * 2, IMG_H * 2 + BOTTOM_BAR_H)
-            cv2.setMouseCallback("Label Minimap Heroes", mouse_cb)
+            cv2.namedWindow("Label Minimap", cv2.WINDOW_NORMAL)
+            cv2.resizeWindow("Label Minimap", IMG_W * 2, IMG_H * 2 + BOTTOM_BAR_H)
+            cv2.setMouseCallback("Label Minimap", mouse_cb)
 
             while True:
                 vis = draw_overlay(display.copy(), boxes, frame_idx, total_frames, fps, vid.name, _label_mode)
-                cv2.imshow("Label Minimap Heroes", vis)
+                cv2.imshow("Label Minimap", vis)
                 k = cv2.waitKey(1) & 0xFF
 
-                if k == ord('b'):
-                    _label_mode[0] = 0
-                    print("  Mode: BLUE")
-                elif k == ord('r'):
-                    _label_mode[0] = 1
-                    print("  Mode: RED")
+                # Class mode switching
+                if k in CLASS_KEYS:
+                    _label_mode[0] = CLASS_KEYS[k]
+                    mode_name = CLASS_NAMES[_label_mode[0]]
+                    print(f"  Mode: {mode_name}")
                 elif k == ord('u'):
                     if boxes:
                         removed = boxes.pop()
-                        label = "BLUE" if removed[0] == 0 else "RED"
+                        label = CLASS_NAMES.get(removed[0], f"CLS_{removed[0]}")
                         print(f"  ↩️  Undo: removed {label} dot")
                 elif k == ord('n'):
                     if boxes:

@@ -29,8 +29,8 @@ WHITE = (255, 255, 255)
 BLACK = (20, 20, 20)
 GRAY = (120, 120, 120)
 
-CLASS_NAMES = {0: "blue_hero", 1: "red_hero"}
-CLASS_COLORS = {0: BLUE, 1: RED}
+CLASS_NAMES = {0: "blue_hero", 1: "red_hero", 2: "jungle"}
+CLASS_COLORS = {0: BLUE, 1: RED, 2: GREEN}
 
 
 def load_dataset_items(base_dir: Path, split: str = "train") -> list[tuple[Path, Path | None]]:
@@ -54,69 +54,105 @@ def load_dataset_items(base_dir: Path, split: str = "train") -> list[tuple[Path,
     return items
 
 
-def draw_labels_on_image(img: np.ndarray, lbl_path: Path | None) -> tuple[np.ndarray, list[dict]]:
+def save_labels(lbl_path: Path, labels_data: list[tuple[int, float, float, float, float]]):
+    """Simpan list label ke file txt format YOLO."""
+    lbl_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(lbl_path, "w") as f:
+        for cls_id, cx, cy, bw, bh in labels_data:
+            f.write(f"{cls_id} {cx:.6f} {cy:.6f} {bw:.6f} {bh:.6f}\n")
+
+
+def deduplicate_labels(labels: list[tuple[int, float, float, float, float]], w: int = 350, h: int = 340, dist_thresh: float = 12.0) -> tuple[list[tuple[int, float, float, float, float]], bool]:
+    """Hapus label duplikat yang berjarak < dist_thresh piksel di gambar yang sama."""
+    deduped = []
+    seen = []
+    has_changed = False
+
+    for cls_id, cx_n, cy_n, w_n, h_n in labels:
+        cx_px, cy_px = cx_n * w, cy_n * h
+        is_dup = False
+        for p_cls, p_cx, p_cy in seen:
+            if p_cls == cls_id and ((cx_px - p_cx) ** 2 + (cy_px - p_cy) ** 2) ** 0.5 < dist_thresh:
+                is_dup = True
+                has_changed = True
+                break
+        if not is_dup:
+            seen.append((cls_id, cx_px, cy_px))
+            deduped.append((cls_id, cx_n, cy_n, w_n, h_n))
+
+    return deduped, has_changed
+
+
+def load_raw_labels(lbl_path: Path | None, auto_clean: bool = True) -> list[tuple[int, float, float, float, float]]:
+    """Baca data mentah label YOLO dari file txt dengan auto-deduplikasi."""
+    if lbl_path is None or not lbl_path.exists():
+        return []
+    labels = []
+    try:
+        with open(lbl_path, "r") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                parts = line.split()
+                if len(parts) >= 5:
+                    labels.append((int(parts[0]), float(parts[1]), float(parts[2]), float(parts[3]), float(parts[4])))
+
+        if auto_clean and labels:
+            clean_labels, has_changed = deduplicate_labels(labels)
+            if has_changed:
+                save_labels(lbl_path, clean_labels)
+                print(f"  🧹 Auto-cleaned duplicate labels in {lbl_path.name}")
+                return clean_labels
+    except Exception as e:
+        print(f" ⚠️ Error membaca {lbl_path}: {e}")
+    return labels
+
+
+def draw_labels_on_image(img: np.ndarray, labels_data: list[tuple[int, float, float, float, float]]) -> tuple[np.ndarray, list[dict]]:
     """Gambarkan bounding box dan titik pusat label YOLO di gambar."""
     vis = img.copy()
     h, w = img.shape[:2]
     labels_info = []
 
-    if lbl_path is None or not lbl_path.exists():
-        return vis, labels_info
+    for idx, (cls_id, cx_norm, cy_norm, w_norm, h_norm) in enumerate(labels_data):
+        # Konversi koordinat ternormalisasi ke piksel
+        cx = int(cx_norm * w)
+        cy = int(cy_norm * h)
+        bw = int(w_norm * w)
+        bh = int(h_norm * h)
 
-    try:
-        with open(lbl_path, "r") as f:
-            lines = f.readlines()
+        x1 = max(0, cx - bw // 2)
+        y1 = max(0, cy - bh // 2)
+        x2 = min(w - 1, cx + bw // 2)
+        y2 = min(h - 1, cy + bh // 2)
 
-        for idx, line in enumerate(lines):
-            line = line.strip()
-            if not line:
-                continue
-            parts = line.split()
-            if len(parts) < 5:
-                continue
+        color = CLASS_COLORS.get(cls_id, GREEN)
+        cls_name = CLASS_NAMES.get(cls_id, f"cls_{cls_id}")
 
-            cls_id = int(parts[0])
-            cx_norm, cy_norm = float(parts[1]), float(parts[2])
-            w_norm, h_norm = float(parts[3]), float(parts[4])
+        # Gambar Kotak + Lingkaran Tengah
+        r = max(bw, bh) // 2
+        cv2.rectangle(vis, (x1, y1), (x2, y2), color, 2)
+        cv2.circle(vis, (cx, cy), max(2, r), color, 2)
+        cv2.circle(vis, (cx, cy), 2, (255, 255, 255), -1)
 
-            # Konversi koordinat ternormalisasi ke piksel
-            cx = int(cx_norm * w)
-            cy = int(cy_norm * h)
-            bw = int(w_norm * w)
-            bh = int(h_norm * h)
+        # Label teks
+        text = f"#{idx+1} {cls_name}"
+        (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
 
-            x1 = max(0, cx - bw // 2)
-            y1 = max(0, cy - bh // 2)
-            x2 = min(w - 1, cx + bw // 2)
-            y2 = min(h - 1, cy + bh // 2)
+        ly = max(th + 4, y1)
+        cv2.rectangle(vis, (x1, ly - th - 4), (x1 + tw + 6, ly + 2), BLACK, -1)
+        cv2.rectangle(vis, (x1, ly - th - 4), (x1 + tw + 6, ly + 2), color, 1)
+        cv2.putText(vis, text, (x1 + 3, ly - 2), cv2.FONT_HERSHEY_SIMPLEX, 0.45, WHITE, 1, cv2.LINE_AA)
 
-            color = CLASS_COLORS.get(cls_id, GREEN)
-            cls_name = CLASS_NAMES.get(cls_id, f"cls_{cls_id}")
-
-            # Gambar Kotak + Lingkaran Tengah
-            r = max(bw, bh) // 2
-            cv2.rectangle(vis, (x1, y1), (x2, y2), color, 2)
-            cv2.circle(vis, (cx, cy), max(2, r), color, 2)
-            cv2.circle(vis, (cx, cy), 2, (255, 255, 255), -1)
-
-            # Label teks
-            text = f"#{idx+1} {cls_name}"
-            (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
-
-            ly = max(th + 4, y1)
-            cv2.rectangle(vis, (x1, ly - th - 4), (x1 + tw + 6, ly + 2), BLACK, -1)
-            cv2.rectangle(vis, (x1, ly - th - 4), (x1 + tw + 6, ly + 2), color, 1)
-            cv2.putText(vis, text, (x1 + 3, ly - 2), cv2.FONT_HERSHEY_SIMPLEX, 0.45, WHITE, 1, cv2.LINE_AA)
-
-            labels_info.append({
-                "id": idx + 1,
-                "class_id": cls_id,
-                "class_name": cls_name,
-                "cx": cx, "cy": cy, "w": bw, "h": bh
-            })
-
-    except Exception as e:
-        cv2.putText(vis, f"Error label: {e}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, RED, 1)
+        labels_info.append({
+            "id": idx + 1,
+            "class_id": cls_id,
+            "class_name": cls_name,
+            "cx": cx, "cy": cy, "w": bw, "h": bh,
+            "cx_norm": cx_norm, "cy_norm": cy_norm,
+            "w_norm": w_norm, "h_norm": h_norm,
+        })
 
     return vis, labels_info
 
@@ -144,19 +180,96 @@ def main():
         return
 
     print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    print(" 🔍 MLBB Dataset Inspector")
+    print(" 🔍 MLBB Dataset Inspector & Editor")
     print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     print(f" Total sampel: {len(items)} gambar")
-    print(" Kontrol:")
-    print("   [ -> ] / [ D ] / [ N ] : Gambar Selanjutnya")
-    print("   [ <- ] / [ A ] / [ P ] : Gambar Sebelumnya")
-    print("   [ Q ]  / [ ESC ]     : Keluar")
+    print(" Kontrol Navigasi:")
+    print("   [ -> / D / N / Space ] : Gambar Selanjutnya")
+    print("   [ <- / A / P ]         : Gambar Sebelumnya")
+    print("   [ X / DEL ]            : Hapus Gambar + File Label")
+    print("   [ Q / ESC ]            : Keluar")
+    print(" Kontrol Labeling (Interaktif):")
+    print("   [ Klik Kiri pada Kosong ] : Tambah dot mode aktif")
+    print("   [ Klik pada Dot Ada ]    : Hapus dot tersebut")
+    print("   [ Klik Kanan ]           : Tambah red_hero (shortcut) / Hapus dot")
+    print("   [ B / 0 ] = Blue | [ R / 1 ] = Red | [ J / 2 ] = Jungle")
+    print("   [ U ] = Undo Dot  | [ C ] = Clear All Dots")
     print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
 
     current_idx = 0
+    active_class = 0  # Default class: blue_hero
+    display_scale = 1.6
+    header_h = 130
+
     window_name = "MLBB Minimap Dataset Inspector"
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
     cv2.resizeWindow(window_name, 700, 750)
+
+    # Variables for mouse callback
+    mouse_event_triggered = [False]
+    last_action_msg = [""]
+
+    def mouse_callback(event, x, y, flags, param):
+        nonlocal active_class
+        if event not in (cv2.EVENT_LBUTTONDOWN, cv2.EVENT_RBUTTONDOWN):
+            return
+
+        img_path, lbl_path = items[current_idx]
+        if lbl_path is None:
+            split_dir = "val" if "val" in str(img_path) else "train"
+            lbl_path = base_dir / "labels" / split_dir / f"{img_path.stem}.txt"
+            items[current_idx] = (img_path, lbl_path)
+
+        img_temp = cv2.imread(str(img_path))
+        if img_temp is None:
+            return
+        h, w = img_temp.shape[:2]
+
+        # Calculate coordinates relative to image canvas
+        rel_y = y - header_h
+        if rel_y < 0 or rel_y >= int(h * display_scale) or x < 0 or x >= int(w * display_scale):
+            return
+
+        img_x = int(x / display_scale)
+        img_y = int(rel_y / display_scale)
+
+        raw_labels = load_raw_labels(lbl_path)
+
+        # Check if clicked near an existing dot (within 14px radius)
+        hit_idx = -1
+        min_dist = 999.0
+        for i, (c_id, cx_n, cy_n, w_n, h_n) in enumerate(raw_labels):
+            cx_px, cy_px = int(cx_n * w), int(cy_n * h)
+            dist = ((img_x - cx_px) ** 2 + (img_y - cy_px) ** 2) ** 0.5
+            if dist < 16 and dist < min_dist:
+                min_dist = dist
+                hit_idx = i
+
+        if hit_idx >= 0:
+            # Delete clicked dot
+            removed = raw_labels.pop(hit_idx)
+            c_name = CLASS_NAMES.get(removed[0], f"cls_{removed[0]}")
+            save_labels(lbl_path, raw_labels)
+            last_action_msg[0] = f"🗑️ Label #{hit_idx+1} ({c_name}) dihapus!"
+            print(f"  {last_action_msg[0]}")
+        else:
+            # Add new dot
+            target_cls = 1 if event == cv2.EVENT_RBUTTONDOWN else active_class
+            c_name = CLASS_NAMES.get(target_cls, f"cls_{target_cls}")
+            dot_size = 34
+            cx_norm = img_x / max(1, w)
+            cy_norm = img_y / max(1, h)
+            w_norm = dot_size / max(1, w)
+            h_norm = dot_size / max(1, h)
+
+            raw_labels.append((target_cls, cx_norm, cy_norm, w_norm, h_norm))
+            save_labels(lbl_path, raw_labels)
+            last_action_msg[0] = f"➕ Tambah {c_name} at ({img_x},{img_y})"
+            print(f"  {last_action_msg[0]}")
+
+        mouse_event_triggered[0] = True
+
+    cv2.setMouseCallback(window_name, mouse_callback)
 
     while True:
         img_path, lbl_path = items[current_idx]
@@ -167,16 +280,15 @@ def main():
             cv2.putText(canvas, f"Gagal membaca: {img_path.name}", (20, 200),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, RED, 1)
         else:
-            vis_img, labels_info = draw_labels_on_image(img, lbl_path)
+            raw_labels = load_raw_labels(lbl_path)
+            vis_img, labels_info = draw_labels_on_image(img, raw_labels)
             h, w = vis_img.shape[:2]
 
             # Skalakan gambar minimap agar nyaman dilihat
-            display_scale = 1.6
             dw, dh = int(w * display_scale), int(h * display_scale)
             resized_vis = cv2.resize(vis_img, (dw, dh), interpolation=cv2.INTER_NEAREST)
 
             # Buat Panel Informasi / Header
-            header_h = 130
             canvas = np.zeros((dh + header_h, dw, 3), dtype=np.uint8)
             canvas[:header_h, :] = (30, 30, 35)
 
@@ -185,48 +297,107 @@ def main():
             cv2.putText(canvas, f"[{split_tag}] Image ({current_idx + 1}/{len(items)}): {img_path.name}",
                         (12, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.5, GREEN, 1, cv2.LINE_AA)
 
+            # Active Mode
+            mode_name = CLASS_NAMES.get(active_class, f"cls_{active_class}")
+            mode_color = CLASS_COLORS.get(active_class, GREEN)
+            cv2.putText(canvas, f"Mode Tambah: {mode_name} [B/R/J]", (dw - 220, 25),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, mode_color, 1, cv2.LINE_AA)
+
             # Label status
             blue_cnt = sum(1 for l in labels_info if l["class_id"] == 0)
             red_cnt = sum(1 for l in labels_info if l["class_id"] == 1)
+            jungle_cnt = sum(1 for l in labels_info if l["class_id"] == 2)
 
-            if lbl_path and lbl_path.exists():
-                lbl_status = f"Labels: {len(labels_info)}  (Blue: {blue_cnt}, Red: {red_cnt})"
+            if lbl_path and lbl_path.exists() and len(labels_info) > 0:
+                lbl_status = f"Labels: {len(labels_info)} (B: {blue_cnt}, R: {red_cnt}, J: {jungle_cnt})"
                 lbl_color = (200, 255, 200)
             else:
-                lbl_status = "⚠️ No Label File Found (.txt)"
-                lbl_color = RED
+                lbl_status = "⚠️ Belum ada label / Empty"
+                lbl_color = RED if not (lbl_path and lbl_path.exists()) else (180, 180, 180)
 
             cv2.putText(canvas, lbl_status, (12, 48),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.45, lbl_color, 1, cv2.LINE_AA)
 
-            # Detail koordinat label
-            details_str = " | ".join([f"#{l['id']} {l['class_name'][:4]} ({l['cx']},{l['cy']})" for l in labels_info])
-            if not details_str:
-                details_str = "Tidak ada objek hero terlabeli (Empty)"
-            cv2.putText(canvas, details_str[:70], (12, 70),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (180, 180, 180), 1, cv2.LINE_AA)
+            # Detail koordinat label / Action msg
+            if last_action_msg[0]:
+                cv2.putText(canvas, last_action_msg[0], (12, 70),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 255), 1, cv2.LINE_AA)
+            else:
+                details_str = " | ".join([f"#{l['id']}{l['class_name'][:1]}({l['cx']},{l['cy']})" for l in labels_info])
+                if not details_str:
+                    details_str = "Klik pada gambar untuk menambah dot label"
+                cv2.putText(canvas, details_str[:70], (12, 70),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.4, (180, 180, 180), 1, cv2.LINE_AA)
 
             # Baris Bantuan Navigasi
             cv2.rectangle(canvas, (0, 85), (dw, header_h), (45, 45, 55), -1)
-            cv2.putText(canvas, "[<-/A] Prev | [->/D/Space] Next | [X/DEL] Hapus | [Q/ESC] Quit",
-                        (12, 112), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 220, 255), 1, cv2.LINE_AA)
+            cv2.putText(canvas, "[Klik] Add/Del | [B/R/J] Class | [U] Undo | [X] DelImg | [<-/->] Nav",
+                        (12, 112), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 220, 255), 1, cv2.LINE_AA)
 
             # Tempel gambar ke canvas
             canvas[header_h:, :] = resized_vis
 
         cv2.imshow(window_name, canvas)
 
-        # Tunggu tombol navigasi
-        key = cv2.waitKeyEx(0)
+        # Non-blocking wait if mouse event was triggered to refresh UI immediately
+        wait_ms = 20 if mouse_event_triggered[0] else 0
+        mouse_event_triggered[0] = False
 
-        # Handle Tombol Keyboard Cross-Platform
+        key = cv2.waitKeyEx(wait_ms)
+        if key == -1:
+            continue
+
+        last_action_msg[0] = ""  # Clear message on key press
+
+        # Handle Tombol Keyboard
         if key in (27, ord('q'), ord('Q')):  # ESC / Q
             break
-        elif key in (ord('x'), ord('X'), 127, 8, 3014656, 65535, 2162688):  # X / Delete / Backspace -> HAPUS
+        elif key in (ord('b'), ord('B'), ord('0')):  # Mode Blue Hero
+            active_class = 0
+            last_action_msg[0] = "Mode: BLUE_HERO"
+        elif key in (ord('r'), ord('R'), ord('1')):  # Mode Red Hero
+            active_class = 1
+            last_action_msg[0] = "Mode: RED_HERO"
+        elif key in (ord('j'), ord('J'), ord('2')):  # Mode Jungle
+            active_class = 2
+            last_action_msg[0] = "Mode: JUNGLE"
+        elif key in (ord('u'), ord('U')):  # Undo last dot
+            raw_labels = load_raw_labels(lbl_path)
+            if raw_labels:
+                popped = raw_labels.pop()
+                save_labels(lbl_path, raw_labels)
+                c_name = CLASS_NAMES.get(popped[0], f"cls_{popped[0]}")
+                last_action_msg[0] = f"↩️ Undo label {c_name}"
+        elif key in (ord('c'), ord('C')):  # Clear all dots
+            if lbl_path and lbl_path.exists():
+                save_labels(lbl_path, [])
+                last_action_msg[0] = "🧹 Semua label dihapus"
+        elif key in (ord('k'), ord('K')):  # Crop jungle patches
+            raw_labels = load_raw_labels(lbl_path)
+            jungle_labels = [l for l in raw_labels if l[0] == 2]
+            if not jungle_labels:
+                last_action_msg[0] = "⚠️ Tidak ada label jungle di gambar ini"
+            else:
+                out_dir = base_dir.parent.parent / "assets" / "creeps_minimap"
+                out_dir.mkdir(parents=True, exist_ok=True)
+                h, w = img.shape[:2]
+                saved_count = 0
+                for i, (cls_id, cx_n, cy_n, w_n, h_n) in enumerate(jungle_labels):
+                    cx, cy = int(cx_n * w), int(cy_n * h)
+                    bw, bh = int(w_n * w), int(h_n * h)
+                    x1, y1 = max(0, cx - bw // 2), max(0, cy - bh // 2)
+                    x2, y2 = min(w, cx + bw // 2), min(h, cy + bh // 2)
+                    patch = img[y1:y2, x1:x2]
+                    if patch.size > 0:
+                        save_name = f"crop_{img_path.stem}_{i+1}.png"
+                        cv2.imwrite(str(out_dir / save_name), patch)
+                        saved_count += 1
+                last_action_msg[0] = f"✂️ Crop {saved_count} patch ke assets/creeps_minimap/"
+                print(f"  {last_action_msg[0]}")
+        elif key in (ord('x'), ord('X'), 127, 8, 3014656, 65535, 2162688):  # X / Delete / Backspace -> HAPUS Gambar
             img_path, lbl_path = items[current_idx]
             print(f" 🗑️ Hapus gambar & label: {img_path.name}")
 
-            # Hapus file gambar & file label
             try:
                 img_path.unlink(missing_ok=True)
                 if lbl_path and lbl_path.exists():
@@ -234,7 +405,6 @@ def main():
             except Exception as e:
                 print(f" ❌ Gagal menghapus {img_path.name}: {e}")
 
-            # Hapus dari daftar di memori
             items.pop(current_idx)
 
             if not items:

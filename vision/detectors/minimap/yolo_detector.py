@@ -132,7 +132,7 @@ class YOLOMinimapDetector:
             cx = max(0, min(w - 1, cx))
             cy = max(0, min(h - 1, cy))
 
-            team = "blue" if cls_id == 0 else "red"
+            team = {0: "blue", 1: "red", 2: "jungle"}.get(cls_id, "unknown")
             detections.append((team, cx, cy, r, conf))
 
         return detections
