@@ -7,7 +7,12 @@ Usage: python tools/train_yolo.py
 
 import os
 import sys
+import warnings
 from pathlib import Path
+
+# Suppress MPS warnings SEBELUM import ultralytics
+os.environ["PYTHONWARNINGS"] = "ignore"
+warnings.filterwarnings("ignore")
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
@@ -18,6 +23,17 @@ except ImportError:
     os.system("pip install ultralytics")
     from ultralytics import YOLO
 
+
+def setup_env():
+    """Suppress warnings, configure environment."""
+    import warnings
+    warnings.filterwarnings("ignore", message=".*does not have a deterministic implementation.*")
+    warnings.filterwarnings("ignore", message=".*index_put_with_accumulate_mps.*")
+
+    import torch
+    # MPS (macOS) deterministic warning — suppress via env
+    import os
+    os.environ["PYTHONWARNINGS"] = "ignore"
 
 def get_device():
     import torch
@@ -41,6 +57,7 @@ def get_best_model() -> str | None:
 
 
 def main():
+    setup_env()
     device = get_device()
     prev_model = get_best_model()
 

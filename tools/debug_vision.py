@@ -155,7 +155,9 @@ class DetectorManager:
         self.red_team_detector = RedTeamDetector(confidence_threshold=0.25)
 
         # ── Minimap Hero Tracker ──
-        self.minimap_hero_tracker = MinimapHeroTracker()
+        self.minimap_hero_tracker = MinimapHeroTracker(
+            yolo_model_path="trainings/hero_detector/yolo11n_minimap/weights/best.pt",
+        )
         self._minimap_coord_mapper = CoordinateMapper.from_layout()
 
         # ── Minimap bbox (dari layout.yaml) ──
@@ -917,6 +919,11 @@ def draw_minimap_heroes(frame: np.ndarray, status: dict[str, Any],
     if not heroes:
         return
 
+    fs = 1.2
+    thick = 4
+    dot_r = 22
+    glow_r = 34
+
     for entry in heroes:
         px = mm_x + entry.get("pixel_x", 0)
         py = mm_y + entry.get("pixel_y", 0)
@@ -924,40 +931,39 @@ def draw_minimap_heroes(frame: np.ndarray, status: dict[str, Any],
         name = entry.get("name", "?")
         conf = entry.get("confidence", 0)
 
-        # Skip jika posisi 0,0 (belum terdeteksi)
         if entry.get("pixel_x", 0) == 0 and entry.get("pixel_y", 0) == 0:
             continue
         if px < mm_x or px > mm_x + mm_w or py < mm_y or py > mm_y + mm_h:
             continue
 
-        # Team colors — BGR format:
-        # Blue team: biru terang, Red team: merah terang
         if team == "blue":
-            outer_color = (255, 100, 50)     # outer glow (blue)
-            fill_color = (220, 80, 30)       # fill (dark blue)
+            outer_color = (255, 140, 60)
+            fill_color = (220, 80, 30)
         else:
-            outer_color = (50, 50, 255)      # outer glow (red)
-            fill_color = (30, 30, 200)       # fill (dark red)
+            outer_color = (60, 60, 255)
+            fill_color = (30, 30, 200)
 
-        # Bigger glow (radius 12)
-        cv2.circle(frame, (px, py), 12, outer_color, 3)
-        # Bigger filled dot (radius 8)
-        cv2.circle(frame, (px, py), 7, fill_color, -1)
-        # White center
-        cv2.circle(frame, (px, py), 3, (255, 255, 255), -1)
+        # Dot + glow
+        cv2.circle(frame, (px, py), glow_r, outer_color, thick)
+        cv2.circle(frame, (px, py), dot_r, fill_color, -1)
+        cv2.circle(frame, (px, py), dot_r // 2, (255, 255, 255), -1)
 
-        # Label hero name
-        label = name[:6]
-        cv2.putText(frame, label, (px + 14, py + 5),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1, cv2.LINE_AA)
-        # Shadow label
-        cv2.putText(frame, label, (px + 15, py + 6),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 0), 1, cv2.LINE_AA)
+        # Label
+        label = name[:10]
+        extra = f" ({conf:.0%})" if conf < 0.8 else ""
+        text = f"{label}{extra}"
 
-        # Low confidence indicator
-        if conf < 0.6:
-            cv2.putText(frame, f"{conf:.0%}", (px + 14, py + 20),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 0, 255), 1, cv2.LINE_AA)
+        (tw, th), bl = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, fs, thick)
+        lx = px + dot_r + 8
+        ly = py + th // 3
+        pad = max(4, int(6 * scale))
+
+        cv2.rectangle(frame, (lx - pad, ly - th - pad), (lx + tw + pad, ly + pad),
+                      (0, 0, 0), -1)
+        cv2.rectangle(frame, (lx - pad, ly - th - pad), (lx + tw + pad, ly + pad),
+                      outer_color, thick // 2 + 1)
+        cv2.putText(frame, text, (lx, ly), cv2.FONT_HERSHEY_SIMPLEX,
+                    fs, (255, 255, 255), thick, cv2.LINE_AA)
 
 
 def draw_minimap_hero_overlay(frame: np.ndarray, status: dict[str, Any]):
@@ -1005,9 +1011,9 @@ def draw_minimap_hero_overlay(frame: np.ndarray, status: dict[str, Any]):
         lines.append(("  (waiting for detection)", (180, 180, 180)))
 
     # ── Draw panel ──
-    panel_w = 320
-    line_h = 22
-    pad = 10
+    panel_w = 380
+    line_h = 28
+    pad = 12
     total_h = len(lines) * line_h + pad * 2
 
     panel_x = 10
@@ -1021,7 +1027,7 @@ def draw_minimap_hero_overlay(frame: np.ndarray, status: dict[str, Any]):
     y_pos = panel_y + pad + line_h - 5
     for text, color in lines:
         cv2.putText(frame, text, (panel_x + 12, y_pos),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1, cv2.LINE_AA)
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2, cv2.LINE_AA)
         y_pos += line_h
 
 
@@ -1155,8 +1161,8 @@ def draw_status_overlay(frame: np.ndarray, status: dict[str, Any]):
         lines.append((f"  Scanning... ({len(red_heroes)}/5)", (180, 180, 180)))
 
     # ── Draw background panel (kanan) ──
-    panel_w = 320
-    line_h = 22
+    panel_w = 380
+    line_h = 28
     pad = 10
     title_h = 30
     total_h = title_h + len(lines) * line_h + pad * 2
@@ -1174,7 +1180,7 @@ def draw_status_overlay(frame: np.ndarray, status: dict[str, Any]):
     y_pos = pad + title_h - 8
     for text, color in lines:
         cv2.putText(frame, text, (panel_x + 12, y_pos), cv2.FONT_HERSHEY_SIMPLEX,
-                    0.5, color, 1, cv2.LINE_AA)
+                    0.6, color, 2, cv2.LINE_AA)
         y_pos += line_h
 
 

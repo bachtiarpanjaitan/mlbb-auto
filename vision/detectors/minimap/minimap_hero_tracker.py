@@ -95,16 +95,16 @@ class TrackedMinimapHero:
     first_seen_frame: int
     frames_alive: int
     confidence: float
-    # Smoothing factor (0-1), higher = smoother
-    smooth_alpha: float = 0.6
+    # Smoothing factor (0-1), lower = lebih responsive (kurang smoothing)
+    smooth_alpha: float = 0.3  # lebih cepat mengikuti pergerakan
     # Konter consecutive miss sebelum dianggap dead
     miss_count: int = 0
     max_miss_before_dead: int = 5
     # Velocity (normalized per frame) untuk position gating
     vel_x: float = 0.0
     vel_y: float = 0.0
-    # Maximum movement per frame (normalized) before gating rejects
-    max_move: float = 0.03  # ~10px on 340px minimap
+    # Maximum movement per frame (normalized) — lebih besar = lebih responsif
+    max_move: float = 0.08  # ~27px pada 340px minimap (sebelumnya 0.03)
 
     def smooth_position(self, raw_x: float, raw_y: float):
         """
@@ -194,7 +194,7 @@ class MinimapHeroTracker:
     def __init__(
         self,
         max_miss_frames: int = 5,
-        match_distance: float = 0.04,
+        match_distance: float = 0.06,
         smooth_alpha: float = 0.6,
         use_coordinate_mapper: bool = True,
         minimap_bbox: tuple[int, int, int, int] | None = None,
@@ -1238,9 +1238,13 @@ class MinimapHeroTracker:
                 self._tracked[name] = h; self._roster_unassigned.discard(name)
                 matched_names.add(name)
 
-        # ── 6. Increment miss_count ──
+        # ── 6. Coasting: gerakin hero yang gak terdeteksi sesuai velocity ──
         for h in self._tracked.values():
             if h.name and h.name not in matched_names:
+                h.norm_x += h.vel_x * 0.5  # half-speed coast
+                h.norm_y += h.vel_y * 0.5
+                h.vel_x *= 0.95
+                h.vel_y *= 0.95
                 h.miss_count += 1
 
         # ── 7. Cleanup dead ──
@@ -1364,11 +1368,15 @@ class MinimapHeroDetector(BaseDetector):
 
     Args:
         tracker: Instance MinimapHeroTracker (dibuat otomatis jika None).
+        yolo_model_path: Path ke YOLO model. Jika None, pake HSV fallback.
     """
 
-    def __init__(self, ocr=None, tracker: MinimapHeroTracker | None = None):
+    def __init__(self, ocr=None, tracker: MinimapHeroTracker | None = None,
+                 yolo_model_path: str | None = None):
         super().__init__(ocr)
-        self.tracker = tracker or MinimapHeroTracker()
+        if tracker is None:
+            tracker = MinimapHeroTracker(yolo_model_path=yolo_model_path)
+        self.tracker = tracker
         self.load_config("minimap")
 
     def set_roster(self, blue_heroes: list[str], red_heroes: list[str]):
