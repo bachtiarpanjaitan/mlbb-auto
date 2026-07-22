@@ -1,11 +1,11 @@
 video: {name: Mobile Legends Replay, width: 2400, height: 1080, fps: 30, aspect_ratio: '20:9'}
 hero_panel:
   description: Panel info hero terpilih — portrait, text, HP bar, skill, item
-  bbox: [669, 769, 1058, 163]
+  bbox: [666, 768, 1058, 163]
   type: composite
   portrait:
     description: Icon wajah hero terpilih
-    bbox: [721, 793, 78, 69]
+    bbox: [715, 789, 88, 78]
     type: template
     templates: heroes
   level:
@@ -111,7 +111,7 @@ detectors:
       color: green
   red_team:
     description: Baris hero tim merah
-    bbox: [1162, 507, 953, 91]
+    bbox: [1206, 947, 953, 91]
     type: composite
     portrait_hero_1:
       bbox: [1323, 962, 67, 67]

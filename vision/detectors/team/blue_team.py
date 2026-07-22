@@ -1,5 +1,5 @@
 """
-Blue Team Hero Detector — Mendeteksi 5 hero tim biru dari portrait di scoreboard.
+Team Detectors — Deteksi 5 hero dari scoreboard untuk blue & red team.
 Menggunakan TemplateMatcher (CCOEFF_NORMED) — template di-resize ke ukuran
 portrait scoreboard lalu dicocokkan secara pixel-based.
 """
@@ -17,7 +17,7 @@ from ..base import BaseDetector, Detection
 from ...matcher import TemplateMatcher
 
 
-logger = logging.getLogger("mlbb.vision.blue_team")
+logger = logging.getLogger("mlbb.vision.team")
 
 
 HERO_ASSETS = os.path.join(
@@ -36,23 +36,21 @@ class HeroPortraitResult:
     hp_pct: float | None = None  # persentase HP dari green bar
 
 
-class BlueTeamDetector(BaseDetector):
+class TeamDetector(BaseDetector):
     """
-    Deteksi 5 hero tim biru sekaligus.
+    Deteksi 5 hero dari scoreboard untuk satu team.
 
-    Menggunakan TemplateMatcher (CCOEFF_NORMED) — template hero 128x128
-    di-resize ke ukuran portrait scoreboard (60x60) lalu dicocokkan
-    secara pixel-based.
-
-    Layout yang diharapkan (dari layout.yaml):
-    - blue_team.portrait_hero_1 ... portrait_hero_5
-    - Setiap bbox: [x, y, w, h] untuk crop portrait
+    Args:
+        team_name: "blue_team" atau "red_team" — nama key di layout.yaml
+        templates_path: Path ke assets/heroes/
+        confidence_threshold: Threshold template matching
     """
 
-    def __init__(self, ocr=None, templates_path: str = HERO_ASSETS, confidence_threshold: float = 0.30):
+    def __init__(self, team_name: str = "blue_team", ocr=None,
+                 templates_path: str = HERO_ASSETS, confidence_threshold: float = 0.30):
         super().__init__(ocr)
-        self.load_config("blue_team")
-        # Gunakan TemplateMatcher (pixel-based) — cocok untuk icon/portrait UI
+        self.team_name = team_name
+        self.load_config(team_name)
         self.matcher = TemplateMatcher(threshold=confidence_threshold)
         self._loaded = False
         self._templates_path = templates_path or HERO_ASSETS
@@ -73,9 +71,6 @@ class BlueTeamDetector(BaseDetector):
             _, _, self._target_w, self._target_h = first_cfg["bbox"]
 
     def _load_templates(self):
-        """
-        Load hero templates dari assets/heroes/, resize ke ukuran portrait scoreboard.
-        """
         if self._loaded:
             return
         path = self._templates_path
@@ -84,7 +79,7 @@ class BlueTeamDetector(BaseDetector):
             return
 
         tw, th = self._target_w, self._target_h
-        logger.info("Resizing hero templates to %dx%d for scoreboard matching", tw, th)
+        logger.info("[%s] Resizing hero templates to %dx%d", self.team_name, tw, th)
 
         count = 0
         for fname in sorted(os.listdir(path)):
@@ -96,13 +91,12 @@ class BlueTeamDetector(BaseDetector):
                     self.matcher.add_template(name, resized)
                     count += 1
         self._loaded = True
-        logger.info("Loaded %d hero templates (resized to %dx%d)", count, tw, th)
+        logger.info("[%s] Loaded %d hero templates (resized to %dx%d)",
+                    self.team_name, count, tw, th)
 
     def detect(self, image: np.ndarray) -> Detection | None:
         """
-        Detect 5 hero portraits dari scoreboard area.
-        Crop tiap portrait langsung dari frame (pakai bbox masing-masing),
-        lalu resize crop ke ukuran template sebelum matching.
+        Detect 5 hero portraits dari scoreboard.
 
         Args:
             image: Full frame (2400x1080)
@@ -118,20 +112,20 @@ class BlueTeamDetector(BaseDetector):
         if not self.matcher.templates:
             return Detection(
                 value={"heroes": [], "detected_count": 0, "all_detected": False},
-                confidence=0.0, label="blue_team",
+                confidence=0.0, label=self.team_name,
                 meta={"error": "No templates loaded"}
             )
 
-        blue_team_region = self._config
+        region = self._config
         tw, th = self._target_w, self._target_h
         results: list[HeroPortraitResult] = []
         detected_count = 0
 
         for i, (pt_key, hp_key) in enumerate(self._slot_keys, 1):
             # ── Portrait ──
-            portrait_cfg = blue_team_region.get(pt_key, {})
+            portrait_cfg = region.get(pt_key, {})
             if not portrait_cfg or "bbox" not in portrait_cfg:
-                logger.warning("Slot %d: no bbox config for %s", i, pt_key)
+                logger.warning("[%s] Slot %d: no bbox for %s", self.team_name, i, pt_key)
                 results.append(HeroPortraitResult(
                     slot=i, hero_name=None, confidence=0.0, bbox=(0, 0, 0, 0)
                 ))
@@ -141,8 +135,6 @@ class BlueTeamDetector(BaseDetector):
             fh, fw = image.shape[:2]
 
             if not (0 <= px < fw and 0 <= py < fh and px + pw <= fw and py + ph <= fh):
-                logger.warning("Slot %d: portrait bbox [%d,%d,%d,%d] out of frame [%dx%d]",
-                               i, px, py, pw, ph, fw, fh)
                 results.append(HeroPortraitResult(
                     slot=i, hero_name=None, confidence=0.0, bbox=(px, py, pw, ph)
                 ))
@@ -155,41 +147,40 @@ class BlueTeamDetector(BaseDetector):
                 ))
                 continue
 
-            # Resize crop → ukuran template, lalu matching
+            # Resize ke ukuran template
             if portrait_img.shape[1] != tw or portrait_img.shape[0] != th:
                 portrait_img = cv2.resize(portrait_img, (tw, th), interpolation=cv2.INTER_AREA)
 
             # Debug: save once
             if not hasattr(self, '_debug_saved_crops'):
                 self._debug_saved_crops = set()
-            crop_key = f"blue_portrait_{i}"
+            crop_key = f"{self.team_name}_portrait_{i}"
             if crop_key not in self._debug_saved_crops:
                 self._debug_saved_crops.add(crop_key)
                 cv2.imwrite(os.path.join(_DEBUG_DIR, f"{crop_key}.png"), portrait_img)
-                logger.info("Saved %s.png (%dx%d) to .tmp/ for inspection", crop_key, tw, th)
+                logger.info("[%s] Saved %s.png to .tmp/", self.team_name, crop_key)
 
             match_result = self.matcher.match(portrait_img)
             if match_result and match_result.success:
                 hero_name = match_result.label
                 conf = match_result.confidence
                 detected_count += 1
-                logger.info("Slot %d MATCH: %s (conf=%.3f)", i, hero_name, conf)
+                logger.info("[%s] Slot %d MATCH: %s (conf=%.3f)",
+                           self.team_name, i, hero_name, conf)
             else:
                 hero_name = None
                 conf = match_result.confidence if match_result else 0.0
-                logger.info("Slot %d NO MATCH (conf=%.3f, threshold=%.2f)",
-                           i, conf, self.confidence_threshold)
+                logger.info("[%s] Slot %d NO MATCH (conf=%.3f, threshold=%.2f)",
+                           self.team_name, i, conf, self.confidence_threshold)
 
-            # ── HP Bar (sama seperti main hero: _extract_bar_pct) ──
+            # ── HP Bar ──
             hp_pct = None
-            hp_cfg = blue_team_region.get(hp_key, {})
+            hp_cfg = region.get(hp_key, {})
             if hp_cfg and "bbox" in hp_cfg:
                 hx, hy, hw, hh = hp_cfg["bbox"]
                 if 0 <= hx < fw and 0 <= hy < fh and hx + hw <= fw and hy + hh <= fh:
                     hp_img = image[hy:hy+hh, hx:hx+hw]
                     if hp_img.size > 0:
-                        # Pakai method SAMA seperti main hero (hitung green pixel/row)
-                        # Tapi threshold V diturunkan karena bar team lebih gelap
                         raw = self._extract_bar_pct(
                             hp_img, hue_range=(45, 90), sat_min=40, val_min=30,
                         )
@@ -216,11 +207,26 @@ class BlueTeamDetector(BaseDetector):
                 "all_detected": all_detected,
             },
             confidence=0.9 if all_detected else 0.5,
-            label="blue_team",
+            label=self.team_name,
             meta={"slots_processed": 5}
         )
 
 
+class BlueTeamDetector(TeamDetector):
+    """Deteksi 5 hero tim biru."""
+    def __init__(self, **kwargs):
+        super().__init__(team_name="blue_team", **kwargs)
+
+
+class RedTeamDetector(TeamDetector):
+    """Deteksi 5 hero tim merah."""
+    def __init__(self, **kwargs):
+        super().__init__(team_name="red_team", **kwargs)
+
+
 def create_blue_team_detector(confidence_threshold: float = 0.30) -> BlueTeamDetector:
-    """Factory function untuk BlueTeamDetector."""
     return BlueTeamDetector(confidence_threshold=confidence_threshold)
+
+
+def create_red_team_detector(confidence_threshold: float = 0.30) -> RedTeamDetector:
+    return RedTeamDetector(confidence_threshold=confidence_threshold)

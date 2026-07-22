@@ -19,7 +19,7 @@ from vision.ocr.reader import OCRReader
 from vision.detectors import HPDetector, ManaDetector, LevelDetector, GoldDetector
 from vision.detectors import SkillsDetector
 from vision.matcher.template import TemplateMatcher
-from vision.detectors.team.blue_team import BlueTeamDetector
+from vision.detectors.team.blue_team import BlueTeamDetector, RedTeamDetector, create_red_team_detector
 from vision.trackers.team_hp_tracker import TeamHPTracker, create_team_hp_tracker
 from vision.core.frame_reader import FrameReader
 import json
@@ -137,8 +137,9 @@ class DetectorManager:
         if spell_templates:
             self._spell_matcher = TemplateMatcher(threshold=0.35, templates=spell_templates)
 
-        # ── Blue Team Detector (5 hero portraits from scoreboard) ──
-        self.blue_team_detector = BlueTeamDetector(confidence_threshold=0.35)
+        # ── Team Detectors (5 hero portraits from scoreboard) ──
+        self.blue_team_detector = BlueTeamDetector(confidence_threshold=0.25)
+        self.red_team_detector = RedTeamDetector(confidence_threshold=0.25)
 
         # ── Cached identified battle spell ──
         self._cached_spell_key: str | None = None
@@ -165,18 +166,33 @@ class DetectorManager:
         """Run all detectors on a frame and return status dict."""
         status: dict[str, Any] = {}
 
-        # ── Hero name ──
-        # Template matching tidak reliable (template full-body vs face portrait in-game).
-        # OCR juga tidak available (PaddleOCR disabled).
-        # Gunakan cached name kalo sudah pernah terdeteksi, otherwise "scanning".
+        # ── Hero name (template matching portrait) ──
         if self._cached_hero_name:
             status["hero_name"] = self._cached_hero_name
         else:
-            status["hero_name"] = "...scanning"
-        last_log = getattr(self, '_last_scan_log', 0)
-        if video_time > 0 and video_time - last_log >= 3:
-            log.info("⏳ Hero masih scanning... (%.0fs)", video_time)
-            self._last_scan_log = video_time
+            # Coba match portrait hero panel
+            portrait_img = crop_region(frame, "hero_panel", "portrait")
+            if portrait_img is not None and portrait_img.size > 0:
+                # Resize ke ukuran template (82x75 dari layout)
+                pt_region = layout.get_region("hero_panel", "portrait")
+                if pt_region and "bbox" in pt_region:
+                    pt_w, pt_h = pt_region["bbox"][2], pt_region["bbox"][3]
+                    if portrait_img.shape[1] != pt_w or portrait_img.shape[0] != pt_h:
+                        portrait_img = cv2.resize(portrait_img, (pt_w, pt_h),
+                                                  interpolation=cv2.INTER_AREA)
+                match = self._hero_matcher.match(portrait_img)
+                if match and match.success:
+                    self._cached_hero_name = match.label
+                    status["hero_name"] = match.label
+                    log.info("✅ Hero identified: %s (conf=%.2f)", match.label, match.confidence)
+                else:
+                    status["hero_name"] = "...scanning"
+                    last_log = getattr(self, '_last_scan_log', 0)
+                    if video_time > 0 and video_time - last_log >= 3:
+                        log.info("⏳ Hero masih scanning... (%.0fs)", video_time)
+                        self._last_scan_log = video_time
+            else:
+                status["hero_name"] = "...scanning"
 
         # ── Simpan sample portrait ke .tmp/ (sekali saja, untuk referensi) ──
         if not getattr(self, '_portrait_saved', False) and video_time > 3:
@@ -294,6 +310,44 @@ class DetectorManager:
         # Add blue team heroes to status for overlay
         status["blue_team_heroes"] = self._blue_team_heroes
         status["blue_team_complete"] = self._blue_team_scanned
+
+        # ── Red Team Detection ──
+        if not hasattr(self, '_red_team_scanned'):
+            self._red_team_scanned = False
+            self._red_team_last_scan = 0.0
+            self._red_team_heroes = []
+            log.info("🔍 Red team scanner initialized")
+
+        if not self._red_team_scanned and video_time - self._red_team_last_scan >= 3.0:
+            self._red_team_last_scan = video_time
+            log.info("🔍 Red team scan at video_time=%.1fs", video_time)
+            red_result = self.red_team_detector.detect(frame)
+            if red_result and red_result.value:
+                heroes = red_result.value.get("heroes", [])
+                detected = [h for h in heroes if h.get("hero_name")]
+                for h in heroes:
+                    if h.get("hero_name"):
+                        log.info("  🟥 Slot %d: %s (conf=%.2f)", h["slot"], h["hero_name"], h["confidence"])
+                    else:
+                        log.info("  🟥 Slot %d: NO MATCH (conf=%.2f)", h["slot"], h["confidence"])
+                for h in detected:
+                    existing = next((x for x in self._red_team_heroes if x["slot"] == h["slot"]), None)
+                    if not existing or h["confidence"] > existing["confidence"]:
+                        if existing:
+                            self._red_team_heroes.remove(existing)
+                        self._red_team_heroes.append({
+                            "name": h["hero_name"],
+                            "slot": h["slot"],
+                            "confidence": h["confidence"],
+                        })
+                log.info("Red team scan result: %d/5 heroes found", len(self._red_team_heroes))
+                if len(self._red_team_heroes) >= 5:
+                    self._red_team_scanned = True
+                    log.info("✅ Red team complete: %s",
+                             ", ".join([f"{h['name']}" for h in self._red_team_heroes]))
+
+        status["red_team_heroes"] = self._red_team_heroes
+        status["red_team_complete"] = self._red_team_scanned
 
         # ── Items + CDR (SEBELUM skills, biar _cdr up-to-date) ──
         self._cdr = 0.0
@@ -740,6 +794,23 @@ def draw_status_overlay(frame: np.ndarray, status: dict[str, Any]):
         lines.append(("____ TIM BIRU (ALLY) ____", (100, 200, 255)))
         lines.append((f"  Scanning... ({len(blue_heroes)}/5)", (180, 180, 180)))
 
+    # ── Red Team (Scoreboard) ──
+    red_heroes = status.get("red_team_heroes", [])
+    red_complete = status.get("red_team_complete", False)
+    if red_heroes:
+        lines.append(("____ TIM MERAH (ENEMY) ____", (100, 100, 255)))
+        for h in sorted(red_heroes, key=lambda x: x["slot"]):
+            hp_text = ""
+            hp = h.get("hp_pct")
+            if hp is not None:
+                hp_text = f" HP:{hp:.0%}"
+            conf_color = (100, 255, 100) if h["confidence"] > 0.6 else (0, 255, 255)
+            hp_color = (0, 255, 0) if (hp or 0) > 0.5 else (0, 200, 255) if (hp or 0) > 0.2 else (0, 0, 255)
+            lines.append((f"  [{h['slot']}] {h['name']}{hp_text}", conf_color if not hp_text else hp_color))
+    elif not red_complete:
+        lines.append(("____ TIM MERAH (ENEMY) ____", (100, 100, 255)))
+        lines.append((f"  Scanning... ({len(red_heroes)}/5)", (180, 180, 180)))
+
     # ── Draw background panel (kanan) ──
     panel_w = 320
     line_h = 22
@@ -1123,18 +1194,19 @@ def main():
         with vision_status_lock:
             current_status = dict(vision_status) if vision_status else {}
 
-        # ── Sync HP tracker ke frame saat ini, lalu merge data ──
+        # ── Sync HP tracker → merge HP untuk blue + red ──
         hp_tracker.sync_frame(frame_count)
         hp_data = hp_tracker.get_all_hp()
-        if hp_data and current_status.get("blue_team_heroes"):
-            hp_map = {h["slot"]: h["hp_pct"] for h in hp_data}
-            for hero in current_status["blue_team_heroes"]:
-                slot = hero.get("slot")
-                if slot is not None and slot in hp_map:
-                    hp_val = hp_map[slot]
-                    # Hanya overwrite kalau HP tracker punya data valid
-                    if hp_val is not None:
-                        hero["hp_pct"] = hp_val
+        if hp_data:
+            for team, status_key in [("blue", "blue_team_heroes"), ("red", "red_team_heroes")]:
+                heroes = current_status.get(status_key, [])
+                if not heroes:
+                    continue
+                team_hp = {h["slot"]: h["hp_pct"] for h in hp_data if h["team"] == team}
+                for hero in heroes:
+                    slot = hero.get("slot")
+                    if slot is not None and slot in team_hp and team_hp[slot] is not None:
+                        hero["hp_pct"] = team_hp[slot]
 
         # ── Drawing (submit ke overlay thread) ──
         if paused and clean_frame is not None:
@@ -1182,6 +1254,13 @@ def main():
             detector_mgr._cached_spell_key = None
             detector_mgr._cached_spell_cd = None
             detector_mgr._cached_hero_name = None
+            # Reset team scanners
+            detector_mgr._blue_team_scanned = False
+            detector_mgr._blue_team_last_scan = 0.0
+            detector_mgr._blue_team_heroes = []
+            detector_mgr._red_team_scanned = False
+            detector_mgr._red_team_last_scan = 0.0
+            detector_mgr._red_team_heroes = []
             with vision_status_lock:
                 vision_status.clear()
             frame_count = 0
