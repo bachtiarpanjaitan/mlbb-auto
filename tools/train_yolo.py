@@ -76,6 +76,7 @@ def main():
 
     # Lower learning rate and specialized augmentation for minimap icons fine-tuning
     lr = 0.001 if prev_model else 0.005
+    project_dir = Path("trainings/hero_detector").resolve()
 
     results = model.train(
         data="trainings/hero_detector/data.yaml",
@@ -90,17 +91,30 @@ def main():
         mosaic=0.0,            # Disable mosaic to prevent tiny hero icons from being cropped/destroyed
         patience=25,
         device=device,
-        project="trainings/hero_detector",
+        project=str(project_dir),
         name="yolo11n_minimap",
         exist_ok=True,
         workers=4,
     )
 
-    # Export
+    # Export ONNX
     model.export(format="onnx", imgsz=352)
-    model_path = "trainings/hero_detector/yolo11n_minimap/weights/best.pt"
+
+    # Ensure target weights directory exists and copy if YOLO saved to default runs/
+    target_dir = Path("trainings/hero_detector/yolo11n_minimap/weights")
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    save_dir = Path(results.save_dir) / "weights"
+    if save_dir.exists():
+        import shutil
+        for weight_file in save_dir.glob("*"):
+            if weight_file.is_file():
+                shutil.copy(weight_file, target_dir / weight_file.name)
+
+    model_path = target_dir / "best.pt"
+    onnx_path = target_dir / "best.onnx"
     print(f"\n✅ Model: {model_path}")
-    print(f"   ONNX:  trainings/hero_detector/yolo11n_minimap/weights/best.onnx")
+    print(f"   ONNX:  {onnx_path}")
 
 
 if __name__ == "__main__":

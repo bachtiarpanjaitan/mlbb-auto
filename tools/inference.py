@@ -86,15 +86,21 @@ def draw_minimap_detections(frame, minimap_img, detections, mm_bbox):
         x2 = int(cx + r)
         y2 = int(cy + r)
 
-        # Box + center (thinner lines & smaller dot)
-        cv2.rectangle(vis, (x1, y1), (x2, y2), color, 1)
-        cv2.circle(vis, (cx, cy), 1, color, -1)
+        # Box + center (clean lines & center dot)
+        cv2.rectangle(vis, (x1, y1), (x2, y2), color, 2)
+        cv2.circle(vis, (cx, cy), 2, color, -1)
 
-        # Label (compact font)
-        label = f"{'B' if team=='blue' else 'R'} {conf:.2f}"
-        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.3, 1)
-        cv2.rectangle(vis, (x1, y1 - th - 2), (x1 + tw + 2, y1), BLACK, -1)
-        cv2.putText(vis, label, (x1 + 1, y1 - 2), cv2.FONT_HERSHEY_SIMPLEX, 0.3, color, 1)
+        # Label (larger & clear font)
+        label_text = f"{'BLUE' if team=='blue' else 'RED'} {conf:.0%}"
+        font_scale = 0.45
+        thick = 1
+        (tw, th), _ = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thick)
+
+        # Label position & background box
+        ly1 = max(th + 4, y1)
+        cv2.rectangle(vis, (x1, ly1 - th - 4), (x1 + tw + 6, ly1 + 2), BLACK, -1)
+        cv2.rectangle(vis, (x1, ly1 - th - 4), (x1 + tw + 6, ly1 + 2), color, 1)
+        cv2.putText(vis, label_text, (x1 + 3, ly1 - 2), cv2.FONT_HERSHEY_SIMPLEX, font_scale, WHITE, thick, cv2.LINE_AA)
 
     frame[mm_y:mm_y+mm_h, mm_x:mm_x+mm_w] = vis
 

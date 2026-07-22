@@ -877,11 +877,11 @@ def draw_minimap_heroes(frame: np.ndarray, status: dict[str, Any],
     if not heroes:
         return
 
-    fs = 0.4
-    thick_circle = 1
+    fs = 0.55
+    thick_circle = 2
     thick_text = 1
-    dot_r = 7
-    glow_r = 12
+    dot_r = 10
+    glow_r = 16
 
     for entry in heroes:
         px = mm_x + entry.get("pixel_x", 0)
@@ -905,20 +905,20 @@ def draw_minimap_heroes(frame: np.ndarray, status: dict[str, Any],
             outer_color = (60, 60, 255)
             fill_color = (30, 30, 200)
 
-        # Dot + glow (smaller & cleaner)
+        # Dot + glow
         cv2.circle(frame, (px, py), glow_r, outer_color, thick_circle)
         cv2.circle(frame, (px, py), dot_r, fill_color, -1)
         cv2.circle(frame, (px, py), max(2, dot_r // 2), (255, 255, 255), -1)
 
-        # Label (compact font & small padding)
+        # Label (readable font & clear padding)
         label = name[:10]
         extra = f" ({conf:.0%})" if conf < 0.8 else ""
         text = f"{label}{extra}"
 
         (tw, th), bl = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, fs, thick_text)
-        lx = px + dot_r + 4
+        lx = px + dot_r + 5
         ly = py + th // 3
-        pad = 3
+        pad = 5
 
         cv2.rectangle(frame, (lx - pad, ly - th - pad), (lx + tw + pad, ly + pad),
                       (0, 0, 0), -1)
@@ -973,9 +973,9 @@ def draw_minimap_hero_overlay(frame: np.ndarray, status: dict[str, Any]):
         lines.append(("  (waiting for detection)", (180, 180, 180)))
 
     # ── Draw panel ──
-    panel_w = 300
-    line_h = 20
-    pad = 8
+    panel_w = 340
+    line_h = 24
+    pad = 10
     total_h = len(lines) * line_h + pad * 2
 
     panel_x = 10
@@ -988,8 +988,8 @@ def draw_minimap_hero_overlay(frame: np.ndarray, status: dict[str, Any]):
 
     y_pos = panel_y + pad + line_h - 5
     for text, color in lines:
-        cv2.putText(frame, text, (panel_x + 8, y_pos),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1, cv2.LINE_AA)
+        cv2.putText(frame, text, (panel_x + 10, y_pos),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
         y_pos += line_h
 
 
