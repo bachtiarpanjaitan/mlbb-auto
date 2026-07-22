@@ -37,6 +37,13 @@ videos/
 # ── Generated assets ──
 assets/databases/*.json
 
+# ── Trained Models ──
+trainings/
+runs/
+*.pt
+*.onnx
+yolo11n.pt
+
 # ── Logs ──
 *.log
 

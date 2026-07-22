@@ -1,9 +1,11 @@
 """
 Coordinate Mapper — Mengkonversi posisi minimap ke koordinat game map.
 
-Minimap pada 2400×1080 replay:
-  - Letak: [2130, 5, 265, 265] (265×265 pixel)
-  - Maping: minimap pixels → game coordinates (10000 × 10000 units)
+Minimap pada 2400×1080 replay (layout.yaml):
+  - Bbox: [80, 0, 350, 340] (350×340 pixel, biasanya square ~340)
+  - Mapping: minimap normalized (0-1) → game coordinates (10000 × 10000 units)
+
+Note: Koordinat minimap dicek dari layout.yaml secara otomatis via from_layout().
 """
 
 from __future__ import annotations
@@ -13,6 +15,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from .landmarks import MAP_SIZE, ALL_LANDMARKS, nearest_landmark, get_lane_for_position
+from ..core import layout as layout_mod
 
 
 @dataclass
@@ -32,26 +35,43 @@ class CoordinateMapper:
     Mapper minimap → game coordinates.
 
     Args:
-        minimap_size: Size of minimap in pixels (width=height since square).
-        map_size: Game map size in units.
-        offset_x: X offset of minimap in frame.
-        offset_y: Y offset of minimap in frame.
+        minimap_size: Size of minimap side in pixels (used for scale calc).
+                       Default from layout.yaml atau fallback 340.
+        map_size: Game map size in units (default 10000).
     """
 
     def __init__(
         self,
-        minimap_size: int = 265,
+        minimap_size: int | None = None,
         map_size: int = MAP_SIZE,
-        offset_x: int = 2130,
-        offset_y: int = 5,
     ):
-        self.minimap_size = minimap_size
-        self.map_size = map_size
-        self.offset_x = offset_x
-        self.offset_y = offset_y
+        # Ambil dari layout.yaml jika tidak specified
+        if minimap_size is None:
+            mm_bbox = layout_mod.bbox("map")
+            if mm_bbox:
+                _, _, mm_w, mm_h = mm_bbox
+                self.minimap_size = max(mm_w, mm_h)
+            else:
+                self.minimap_size = 340  # fallback
+        else:
+            self.minimap_size = minimap_size
 
-        # Scale factor: game units per minimap pixel
-        self.scale = map_size / minimap_size
+        self.map_size = map_size
+
+        # Scale factor: game units per normalized unit
+        # Normalized 0-1 maps to 0-MAP_SIZE
+        self.scale = map_size
+
+    @classmethod
+    def from_layout(cls) -> CoordinateMapper:
+        """Create mapper from layout.yaml minimap bbox."""
+        mm_bbox = layout_mod.bbox("map")
+        if mm_bbox:
+            _, _, mm_w, mm_h = mm_bbox
+            mm_size = max(mm_w, mm_h)
+        else:
+            mm_size = 340
+        return cls(minimap_size=mm_size)
 
     def minimap_to_game(self, norm_x: float, norm_y: float) -> MapPosition:
         """
@@ -68,7 +88,8 @@ class CoordinateMapper:
         nx = max(0.0, min(1.0, norm_x))
         ny = max(0.0, min(1.0, norm_y))
 
-        # Linear mapping
+        # Linear mapping: normalized 0-1 → game 0-MAP_SIZE
+        # MLBB: top-left minimap = top-left game map (origin)
         game_x = nx * self.map_size
         game_y = ny * self.map_size
 
@@ -89,19 +110,23 @@ class CoordinateMapper:
             distance_to_landmark=round(lm_dist, 1),
         )
 
-    def minimap_pixel_to_game(self, px: int, py: int) -> MapPosition:
+    def minimap_pixel_to_game(self, px: int, py: int, mm_w: int | None = None, mm_h: int | None = None) -> MapPosition:
         """
         Convert minimap pixel coordinates to game coordinates.
 
         Args:
-            px: Pixel x within minimap (0 — minimap_size).
-            py: Pixel y within minimap (0 — minimap_size).
+            px: Pixel x within minimap region.
+            py: Pixel y within minimap region.
+            mm_w: Minimap width in pixels (default: minimap_size).
+            mm_h: Minimap height in pixels (default: minimap_size).
 
         Returns:
             MapPosition.
         """
-        norm_x = px / self.minimap_size if self.minimap_size > 0 else 0
-        norm_y = py / self.minimap_size if self.minimap_size > 0 else 0
+        w = mm_w or self.minimap_size
+        h = mm_h or self.minimap_size
+        norm_x = px / max(1, w)
+        norm_y = py / max(1, h)
         return self.minimap_to_game(norm_x, norm_y)
 
     def game_to_minimap(self, game_x: float, game_y: float) -> tuple[float, float]:

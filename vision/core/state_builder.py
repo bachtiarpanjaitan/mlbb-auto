@@ -47,6 +47,7 @@ class GameState:
     red_heroes: list[HeroState] = field(default_factory=list)
 
     minimap: Any = None
+    minimap_heroes: list[dict] = field(default_factory=list)  # hero positions on minimap
     lord_timer: str | None = None
     turtle_timer: str | None = None
 
@@ -145,6 +146,39 @@ class StateBuilder:
 
         if any(v is not None for v in (hero.name, hero.level, hero.hp_pct)):
             state.selected_hero = hero
+
+        # ── Minimap Hero Positions ──────────────────────────────────
+        if mmh := detections.get("minimap_heroes"):
+            if isinstance(mmh.value, dict) and "heroes" in mmh.value:
+                state.minimap_heroes = mmh.value["heroes"]
+                # Also update individual hero states
+                for h in mmh.value["heroes"]:
+                    hero_name = h.get("name")
+                    if not hero_name:
+                        continue
+                    team = h.get("team", "unknown")
+                    pos = h.get("game_x"), h.get("game_y")
+                    if pos[0] is not None and pos[1] is not None:
+                        hstate = HeroState(
+                            name=hero_name,
+                            team=team,
+                            position_minimap=(pos[0], pos[1]),
+                        )
+                        if team == "blue":
+                            # Update if exists, else append
+                            for existing in state.blue_heroes:
+                                if existing.name == hero_name:
+                                    existing.position_minimap = (pos[0], pos[1])
+                                    break
+                            else:
+                                state.blue_heroes.append(hstate)
+                        elif team == "red":
+                            for existing in state.red_heroes:
+                                if existing.name == hero_name:
+                                    existing.position_minimap = (pos[0], pos[1])
+                                    break
+                            else:
+                                state.red_heroes.append(hstate)
 
         # ── Objectives ──────────────────────────────────────────────
         if lt := detections.get("objective_timers.lord_timer"):

@@ -20,6 +20,8 @@ from vision.detectors import HPDetector, ManaDetector, LevelDetector, GoldDetect
 from vision.detectors import SkillsDetector
 from vision.matcher.template import TemplateMatcher
 from vision.detectors.team.blue_team import BlueTeamDetector, RedTeamDetector, create_red_team_detector
+from vision.detectors.minimap.minimap_hero_tracker import MinimapHeroTracker
+from vision.mapper.coordinate_mapper import CoordinateMapper
 from vision.trackers.team_hp_tracker import TeamHPTracker, create_team_hp_tracker
 from vision.core.frame_reader import FrameReader
 import json
@@ -152,6 +154,17 @@ class DetectorManager:
         self.blue_team_detector = BlueTeamDetector(confidence_threshold=0.25)
         self.red_team_detector = RedTeamDetector(confidence_threshold=0.25)
 
+        # ── Minimap Hero Tracker ──
+        self.minimap_hero_tracker = MinimapHeroTracker()
+        self._minimap_coord_mapper = CoordinateMapper.from_layout()
+
+        # ── Minimap bbox (dari layout.yaml) ──
+        mm_bbox = layout.bbox("map")
+        if mm_bbox:
+            self._mm_x, self._mm_y, self._mm_w, self._mm_h = mm_bbox
+        else:
+            self._mm_x, self._mm_y, self._mm_w, self._mm_h = (80, 0, 350, 340)
+
         # ── Cached identified battle spell (periodic retry, bukan one-shot) ──
         self._cached_spell_key: str | None = None
         self._cached_spell_cd: float | None = None
@@ -180,9 +193,12 @@ class DetectorManager:
 
         log.info("Detectors initialized")
 
-    def detect(self, frame: np.ndarray, video_time: float = 0) -> dict[str, Any]:
+    def detect(self, frame: np.ndarray, video_time: float = 0, frame_idx: int | None = None) -> dict[str, Any]:
         """Run all detectors on a frame and return status dict."""
         status: dict[str, Any] = {}
+        # Gunakan frame_idx dari caller, atau estimasi dari video_time
+        if frame_idx is None:
+            frame_idx = int(video_time * 30)
 
         # ── Hero name (template matching portrait) ──
         if self._cached_hero_name:
@@ -366,6 +382,80 @@ class DetectorManager:
 
         status["red_team_heroes"] = self._red_team_heroes
         status["red_team_complete"] = self._red_team_scanned
+
+        # ── Minimap Hero Tracking ──
+        # Pass roster ke tracker jika kedua team sudah complete
+        if self._blue_team_scanned and self._red_team_scanned:
+            if not getattr(self, '_minimap_roster_set', False):
+                blue_names = [h["name"] for h in self._blue_team_heroes if h.get("name")]
+                red_names = [h["name"] for h in self._red_team_heroes if h.get("name")]
+                if len(blue_names) == 5 and len(red_names) == 5:
+                    self.minimap_hero_tracker.set_roster(blue_names, red_names)
+                    self._minimap_roster_set = True
+                    log.info("✅ Minimap tracker roster set: %d blue + %d red heroes",
+                             len(blue_names), len(red_names))
+
+                    # ── Crop hero portraits dari scoreboard sebagai template ──
+                    portraits = {}
+                    for team_key in ("blue_team", "red_team"):
+                        for i in range(1, 6):
+                            pt_key = f"portrait_hero_{i}"
+                            pt_cfg = layout.get_region(team_key, pt_key)
+                            if pt_cfg and "bbox" in pt_cfg:
+                                bx, by, bw, bh = pt_cfg["bbox"]
+                                if 0 <= by < frame.shape[0] and 0 <= bx < frame.shape[1]:
+                                    crop = frame[by:by+bh, bx:bx+bw]
+                                    if crop.size > 0:
+                                        # Map to hero name
+                                        hero_list = self._blue_team_heroes if team_key == "blue_team" else self._red_team_heroes
+                                        hero_entry = next((h for h in hero_list if h["slot"] == i), None)
+                                        if hero_entry and hero_entry.get("name"):
+                                            portraits[hero_entry["name"]] = crop
+                    if portraits:
+                        self.minimap_hero_tracker.set_portrait_crops(portraits)
+                        log.info("✅ Set %d hero portrait crops as templates", len(portraits))
+
+        # Crop minimap dan track hero positions
+        if not hasattr(self, '_minimap_last_frame'):
+            self._minimap_last_frame = 0
+            self._minimap_heroes = []
+
+        mm_frame_interval = 3  # update every 3 frames
+        if video_time > 0 or True:  # always run once available
+            mm_img = crop_region(frame, "map")
+            if mm_img is not None and mm_img.size > 0:
+                mm_heroes = self.minimap_hero_tracker.update(mm_img, frame_idx)
+                self._minimap_heroes = mm_heroes
+                status["minimap_heroes"] = [
+                    {
+                        "name": h.name,
+                        "team": h.team,
+                        "norm_x": round(h.norm_x, 3),
+                        "norm_y": round(h.norm_y, 3),
+                        "pixel_x": h.pixel_x,
+                        "pixel_y": h.pixel_y,
+                        "confidence": round(h.confidence, 3),
+                        "game_x": round(h.game_pos.x, 1) if h.game_pos else None,
+                        "game_y": round(h.game_pos.y, 1) if h.game_pos else None,
+                        "lane": h.game_pos.lane if h.game_pos else None,
+                        "nearest": h.game_pos.nearest_landmark if h.game_pos else None,
+                    }
+                    for h in mm_heroes
+                ]
+                status["minimap_tracking_active"] = True
+            else:
+                status["minimap_tracking_active"] = False
+
+        # ── Debug: raw detection data untuk minimap overlay ──
+        debug_data = self.minimap_hero_tracker.get_last_debug_data()
+        if debug_data:
+            # Simpan mask dan raw contours untuk visualization di overlay
+            status["_mm_debug"] = {
+                "blue_mask": debug_data.get("blue_mask"),
+                "red_mask": debug_data.get("red_mask"),
+                "blue_dots": debug_data.get("blue_dots", []),
+                "red_dots": debug_data.get("red_dots", []),
+            }
 
         # ── Items + CDR (SEBELUM skills, biar _cdr up-to-date) ──
         self._cdr = 0.0
@@ -753,6 +843,188 @@ def draw_grid(frame: np.ndarray):
             cv2.putText(frame, str(y), (2, int(y + 14 * fs)), cv2.FONT_HERSHEY_SIMPLEX, fs * 0.7, (180, 180, 100), 1)
 
 
+# ── Global debug toggle (toggled by 'M' key) ──
+_show_mm_debug = False
+
+
+def draw_minimap_debug(frame: np.ndarray, status: dict[str, Any],
+                        mm_x: int = 80, mm_y: int = 0,
+                        mm_w: int = 350, mm_h: int = 340):
+    """
+    Draw template matching debug overlay on the minimap.
+
+    Shows:
+      - Blue/red mask overlay for detected positions
+      - Hero names and confidence at match locations
+      - Match confidence score
+    """
+    debug = status.get("_mm_debug")
+    if not debug:
+        return
+
+    blue_mask = debug.get("blue_mask")
+    red_mask = debug.get("red_mask")
+    blue_dots = debug.get("blue_dots", [])
+    red_dots = debug.get("red_dots", [])
+    all_circles = debug.get("blue_all_cnt", [])  # (cx, cy, r) from HoughCircles
+
+    # ── Draw ALL HoughCircles (yellow outline) ──
+    for c in all_circles:
+        if isinstance(c, (list, tuple)) and len(c) >= 3:
+            dx, dy, r = c[:3]
+            px, py = mm_x + dx, mm_y + dy
+            cv2.circle(frame, (px, py), int(r), (0, 255, 255), 1)
+
+    # ── Overlay blue mask ──
+    if blue_mask is not None:
+        blue_overlay = np.zeros_like(frame, dtype=np.uint8)
+        mask_bgr = cv2.cvtColor(blue_mask, cv2.COLOR_GRAY2BGR)
+        mask_bgr = cv2.resize(mask_bgr, (mm_w, mm_h))
+        blue_overlay[mm_y:mm_y+mm_h, mm_x:mm_x+mm_w] = (255, 100, 50) & mask_bgr
+        cv2.addWeighted(blue_overlay, 0.3, frame, 0.7, 0, frame)
+
+    # ── Overlay red mask ──
+    if red_mask is not None:
+        red_overlay = np.zeros_like(frame, dtype=np.uint8)
+        mask_bgr = cv2.cvtColor(red_mask, cv2.COLOR_GRAY2BGR)
+        mask_bgr = cv2.resize(mask_bgr, (mm_w, mm_h))
+        red_overlay[mm_y:mm_y+mm_h, mm_x:mm_x+mm_w] = (30, 30, 200) & mask_bgr
+        cv2.addWeighted(red_overlay, 0.3, frame, 0.7, 0, frame)
+
+    # ── Draw confirmed hero dots ──
+    for dx, dy in blue_dots:
+        px, py = mm_x + dx, mm_y + dy
+        cv2.circle(frame, (px, py), 5, (255, 200, 0), -1)
+        cv2.circle(frame, (px, py), 9, (255, 200, 0), 2)
+    for dx, dy in red_dots:
+        px, py = mm_x + dx, mm_y + dy
+        cv2.circle(frame, (px, py), 5, (0, 100, 255), -1)
+        cv2.circle(frame, (px, py), 9, (0, 100, 255), 2)
+
+    # Label
+    cv2.putText(frame, "HOUGH CIRCLES", (mm_x + 2, mm_y + 14),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 255, 255), 1, cv2.LINE_AA)
+    cv2.putText(frame, f"B:{len(blue_dots)} R:{len(red_dots)} C:{len(all_circles)}",
+                (mm_x + 2, mm_y + mm_h - 4),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.35, (255, 255, 255), 1, cv2.LINE_AA)
+
+
+def draw_minimap_heroes(frame: np.ndarray, status: dict[str, Any],
+                         mm_x: int = 80, mm_y: int = 0,
+                         mm_w: int = 350, mm_h: int = 340):
+    """Draw hero dots + names on the minimap overlay (alive only)."""
+    heroes = status.get("minimap_heroes", [])
+    if not heroes:
+        return
+
+    for entry in heroes:
+        px = mm_x + entry.get("pixel_x", 0)
+        py = mm_y + entry.get("pixel_y", 0)
+        team = entry.get("team", "blue")
+        name = entry.get("name", "?")
+        conf = entry.get("confidence", 0)
+
+        # Skip jika posisi 0,0 (belum terdeteksi)
+        if entry.get("pixel_x", 0) == 0 and entry.get("pixel_y", 0) == 0:
+            continue
+        if px < mm_x or px > mm_x + mm_w or py < mm_y or py > mm_y + mm_h:
+            continue
+
+        # Team colors — BGR format:
+        # Blue team: biru terang, Red team: merah terang
+        if team == "blue":
+            outer_color = (255, 100, 50)     # outer glow (blue)
+            fill_color = (220, 80, 30)       # fill (dark blue)
+        else:
+            outer_color = (50, 50, 255)      # outer glow (red)
+            fill_color = (30, 30, 200)       # fill (dark red)
+
+        # Bigger glow (radius 12)
+        cv2.circle(frame, (px, py), 12, outer_color, 3)
+        # Bigger filled dot (radius 8)
+        cv2.circle(frame, (px, py), 7, fill_color, -1)
+        # White center
+        cv2.circle(frame, (px, py), 3, (255, 255, 255), -1)
+
+        # Label hero name
+        label = name[:6]
+        cv2.putText(frame, label, (px + 14, py + 5),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1, cv2.LINE_AA)
+        # Shadow label
+        cv2.putText(frame, label, (px + 15, py + 6),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 0), 1, cv2.LINE_AA)
+
+        # Low confidence indicator
+        if conf < 0.6:
+            cv2.putText(frame, f"{conf:.0%}", (px + 14, py + 20),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.35, (0, 0, 255), 1, cv2.LINE_AA)
+
+
+def draw_minimap_hero_overlay(frame: np.ndarray, status: dict[str, Any]):
+    """
+    Draw minimap hero tracking info panel at bottom-left of video.
+    Always shown when overlay is on.
+    """
+    fh, fw = frame.shape[:2]
+    mm_heroes = status.get("minimap_heroes", [])
+
+    # Build lines
+    lines: list[tuple[str, tuple[int, int, int]]] = []
+    lines.append(("🗺 MINIMAP HEROES", (100, 255, 200)))
+
+    # Always show roster status
+    blue_complete = status.get("blue_team_complete", False)
+    red_complete = status.get("red_team_complete", False)
+    roster_status = f"roster: B{'✓' if blue_complete else '...'}/R{'✓' if red_complete else '...'}"
+    lines.append((f"  {roster_status}", (180, 180, 180)))
+
+    if mm_heroes:
+        for team_label, team_color in [("BLUE", (100, 200, 255)), ("RED", (100, 100, 255))]:
+            team_heroes = [e for e in mm_heroes if e["team"] == team_label.lower()]
+            if team_heroes:
+                lines.append((f"  [{team_label}] {len(team_heroes)} visible", team_color))
+                for entry in sorted(team_heroes, key=lambda x: x.get("name") or ""):
+                    name = entry.get("name") or "?"
+                    gx, gy = entry.get("game_x"), entry.get("game_y")
+                    loc = entry.get("nearest") or entry.get("lane") or ""
+                    conf = entry.get("confidence", 0)
+
+                    conf_color = (100, 255, 100) if conf > 0.8 else (0, 255, 255) if conf > 0.5 else (0, 0, 255)
+
+                    if gx is not None and gy is not None:
+                        text = f"  {name}: ({gx:.0f}, {gy:.0f})"
+                    else:
+                        nxy = f"({entry['norm_x']:.2f}, {entry['norm_y']:.2f})"
+                        text = f"  {name}: {nxy}"
+
+                    if loc:
+                        text += f" @{loc}"
+
+                    lines.append((text, conf_color))
+    else:
+        lines.append(("  (waiting for detection)", (180, 180, 180)))
+
+    # ── Draw panel ──
+    panel_w = 320
+    line_h = 22
+    pad = 10
+    total_h = len(lines) * line_h + pad * 2
+
+    panel_x = 10
+    panel_y = fh - total_h - 10
+
+    overlay = frame.copy()
+    cv2.rectangle(overlay, (panel_x, panel_y), (panel_x + panel_w, panel_y + total_h), (20, 20, 30), -1)
+    cv2.addWeighted(overlay, 0.85, frame, 0.15, 0, frame)
+    cv2.rectangle(frame, (panel_x, panel_y), (panel_x + panel_w, panel_y + total_h), (80, 80, 120), 1)
+
+    y_pos = panel_y + pad + line_h - 5
+    for text, color in lines:
+        cv2.putText(frame, text, (panel_x + 12, y_pos),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1, cv2.LINE_AA)
+        y_pos += line_h
+
+
 def draw_region_boxes(frame: np.ndarray):
     """Draw hero_panel bounding box + sub-region boxes (in-place)."""
     hp_box = layout.bbox("hero_panel")
@@ -914,6 +1186,7 @@ _HELP_LINES = [
     ("S / Shift+S", "Save layout / Screenshot"),
     ("G", "Toggle grid"),
     ("O", "Toggle status overlay"),
+    ("M", "Toggle minimap debug (HSV mask)"),
     ("H", "Toggle this help"),
     ("L", "Reload layout.yaml"),
     ("R", "Restart video"),
@@ -1214,7 +1487,7 @@ def main():
             except queue.Empty:
                 continue
             try:
-                result = detector_mgr.detect(frame, vt)
+                result = detector_mgr.detect(frame, vt, frame_idx=fc)
                 with vision_status_lock:
                     vision_status = result
             except Exception as e:
@@ -1245,6 +1518,13 @@ def main():
                 if grid_on:
                     draw_grid(frame)
                 draw_region_boxes(frame)
+                # Draw minimap hero dots + info panel (always if ov_on)
+                if ov_on and status:
+                    draw_minimap_heroes(frame, status)
+                    draw_minimap_hero_overlay(frame, status)
+                # Draw minimap debug overlay (templ match details)
+                if _show_mm_debug and status:
+                    draw_minimap_debug(frame, status)
                 if edit_mode:
                     editor.draw(frame)
                 if help_on:
@@ -1354,6 +1634,10 @@ def main():
             detector_mgr._red_team_scanned = False
             detector_mgr._red_team_last_scan = 0.0
             detector_mgr._red_team_heroes = []
+            # Reset minimap tracker
+            detector_mgr.minimap_hero_tracker.reset()
+            detector_mgr._minimap_roster_set = False
+            detector_mgr._minimap_heroes = []
             with vision_status_lock:
                 vision_status.clear()
             frame_count = 0
@@ -1367,6 +1651,10 @@ def main():
         if k == ord("g"):
             show_grid ^= True
             print(f"Grid: {'ON' if show_grid else 'OFF'}")
+        if k == ord("m"):
+            global _show_mm_debug
+            _show_mm_debug ^= True
+            print(f"Minimap debug: {'ON' if _show_mm_debug else 'OFF'}")
         if k == ord("l"):
             layout._LAYOUT_CACHE.clear()
             print("🔄 Layout reloaded!")
