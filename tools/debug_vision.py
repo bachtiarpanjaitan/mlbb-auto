@@ -877,8 +877,9 @@ def draw_minimap_heroes(frame: np.ndarray, status: dict[str, Any],
     if not heroes:
         return
 
-    fs = 0.8
-    thick = 3
+    fs = 0.65
+    thick_circle = 3
+    thick_text = 2
     dot_r = 16
     glow_r = 26
 
@@ -902,7 +903,7 @@ def draw_minimap_heroes(frame: np.ndarray, status: dict[str, Any],
             fill_color = (30, 30, 200)
 
         # Dot + glow
-        cv2.circle(frame, (px, py), glow_r, outer_color, thick)
+        cv2.circle(frame, (px, py), glow_r, outer_color, thick_circle)
         cv2.circle(frame, (px, py), dot_r, fill_color, -1)
         cv2.circle(frame, (px, py), dot_r // 2, (255, 255, 255), -1)
 
@@ -911,7 +912,7 @@ def draw_minimap_heroes(frame: np.ndarray, status: dict[str, Any],
         extra = f" ({conf:.0%})" if conf < 0.8 else ""
         text = f"{label}{extra}"
 
-        (tw, th), bl = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, fs, thick)
+        (tw, th), bl = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, fs, thick_text)
         lx = px + dot_r + 8
         ly = py + th // 3
         pad = 8
@@ -919,9 +920,9 @@ def draw_minimap_heroes(frame: np.ndarray, status: dict[str, Any],
         cv2.rectangle(frame, (lx - pad, ly - th - pad), (lx + tw + pad, ly + pad),
                       (0, 0, 0), -1)
         cv2.rectangle(frame, (lx - pad, ly - th - pad), (lx + tw + pad, ly + pad),
-                      outer_color, thick // 2 + 1)
+                      outer_color, thick_circle // 2 + 1)
         cv2.putText(frame, text, (lx, ly), cv2.FONT_HERSHEY_SIMPLEX,
-                    fs, (255, 255, 255), thick, cv2.LINE_AA)
+                    fs, (255, 255, 255), thick_text, cv2.LINE_AA)
 
 
 def draw_minimap_hero_overlay(frame: np.ndarray, status: dict[str, Any]):

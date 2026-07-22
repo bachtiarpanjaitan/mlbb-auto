@@ -673,8 +673,6 @@ class MinimapHeroTracker:
         for team, cx, cy, r in raw_circles:
             # ── Team heroes lookup ──
             team_heroes = [n for n, t in self._roster.items() if t == team]
-            if not team_heroes:
-                continue
 
             # ── Crop patch (24+4=28px, fixed size) ──
             half = 14  # 28//2
@@ -719,18 +717,17 @@ class MinimapHeroTracker:
                         best_name = hero_name
                         best_scale = scale_idx
 
-            # ── Boundary check & identity ──
             border_bonus = self._verify_border_color(minimap_img, cx, cy, team)
-            final_score = best_score + border_bonus if best_name else border_bonus
+            final_score = (best_score + border_bonus) if best_name else max(0.5, border_bonus)
 
-            if final_score >= self.match_threshold:
-                raw_matches.append(_PortraitMatch(
-                    name=best_name, team=team,
-                    cx=cx, cy=cy,
-                    confidence=round(min(1.0, final_score), 4),
-                    scale_idx=best_scale,
-                    bbox=(cx - r, cy - r, r * 2, r * 2),
-                ))
+            # Selalu masukkan deteksi YOLO ke raw_matches agar tidak ada hero hilang
+            raw_matches.append(_PortraitMatch(
+                name=best_name, team=team,
+                cx=cx, cy=cy,
+                confidence=round(min(1.0, final_score), 4),
+                scale_idx=best_scale,
+                bbox=(cx - r, cy - r, r * 2, r * 2),
+            ))
 
         # ── NMS ──
         raw_matches.sort(key=lambda m: m.confidence, reverse=True)
@@ -1070,33 +1067,8 @@ class MinimapHeroTracker:
             if len(self._pos_history[key]) > 60:
                 self._pos_history[key] = self._pos_history[key][-60:]
 
-        # After 30 frames of data, filter by variance
-        if self._pos_history_frames >= 30:
-            # Decay: remove very old history entries (>60 frames ago)
-            for key in list(self._pos_history.keys()):
-                if len(self._pos_history[key]) > 50:
-                    self._pos_history[key] = self._pos_history[key][-40:]
-                # Check variance
-                if len(self._pos_history[key]) >= 10:
-                    xs = [p[0] for p in self._pos_history[key]]
-                    ys = [p[1] for p in self._pos_history[key]]
-                    var = np.var(xs) + np.var(ys)
-                    if var < 15:  # static terrain/tower
-                        del self._pos_history[key]
-
-            # Filter current dots: remove if position is in static history
-            filtered = []
-            for item in all_dots:
-                team, cx, cy, r = item
-                key = (cx//16*16, cy//16*16)
-                if key in self._pos_history:
-                    filtered.append(item)  # has motion history = moving hero
-                # Keep if near a tracked hero (for NN matching)
-                elif any((cx-int(h.norm_x*self._mm_w))**2+(cy-int(h.norm_y*self._mm_h))**2 < 400
-                         for h in self._tracked.values() if h.miss_count < self.max_miss_frames):
-                    filtered.append(item)
-            if filtered:
-                all_dots = filtered
+        # Keep all_dots from YOLO/HSV detector (do not drop stationary heroes)
+        pass
 
         matched_names: set[str] = set()
         used_dots: set[int] = set()  # indices of used dots in all_dots
@@ -1221,7 +1193,7 @@ class MinimapHeroTracker:
                     h.frames_alive += 1; h.miss_count = 0
                     h.confidence = min(1.0, h.frames_alive * 0.04 + 0.5)
 
-        # ── 5. Sisa dots: assign ke roster unassigned ──
+        # ── 5. Sisa dots: assign ke roster unassigned atau unknown ──
         for team, cx, cy, r in all_dots:
             if any(i in used_dots for i, (t, cxc, cyc, rc) in enumerate(all_dots) if (cxc, cyc) == (cx, cy)):
                 continue
@@ -1232,12 +1204,17 @@ class MinimapHeroTracker:
             candidates = [n for n in self._roster_unassigned if self._roster.get(n) == team]
             if candidates:
                 name = candidates[0]
-                nx, ny = self._normalize(cx, cy)
-                h = TrackedMinimapHero(name=name, team=team, norm_x=nx, norm_y=ny,
-                    last_seen_frame=frame_idx, first_seen_frame=frame_idx,
-                    frames_alive=1, confidence=0.5, smooth_alpha=self.smooth_alpha)
-                self._tracked[name] = h; self._roster_unassigned.discard(name)
-                matched_names.add(name)
+                self._roster_unassigned.discard(name)
+            else:
+                self._unknown_counter = getattr(self, "_unknown_counter", 0) + 1
+                name = f"unknown_{team}_{self._unknown_counter}"
+            
+            nx, ny = self._normalize(cx, cy)
+            h = TrackedMinimapHero(name=name, team=team, norm_x=nx, norm_y=ny,
+                last_seen_frame=frame_idx, first_seen_frame=frame_idx,
+                frames_alive=1, confidence=0.5, smooth_alpha=self.smooth_alpha)
+            self._tracked[name] = h
+            matched_names.add(name)
 
         # ── 6. Coasting: gerakin hero yang gak terdeteksi sesuai velocity ──
         for h in self._tracked.values():

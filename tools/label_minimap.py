@@ -17,6 +17,8 @@ from vision.core.cropper import crop_region
 DATASET_DIR = Path("trainings/hero_detector")
 VIDEO_DIR = Path("videos")
 IMG_W, IMG_H = 350, 340
+HERO_DOT_SIZE = 34  # Ukuran lingkaran dot hero lebih pas/presisi (34px)
+
 
 
 def main():
@@ -100,22 +102,24 @@ def main():
             # ── Draw overlay ──
             def draw_overlay(vis, bx, idx, name, _label_mode):
                 for cls, cx, cy, w, h in bx:
-                    x1 = int((cx - w / 2) * 2)
-                    y1 = int((cy - h / 2) * 2)
-                    x2 = int((cx + w / 2) * 2)
-                    y2 = int((cy + h / 2) * 2)
-                    # BGR colors: Blue=(255,0,0), Red=(0,0,255)
+                    center_x = int(cx * 2)
+                    center_y = int(cy * 2)
+                    radius = int((w / 2) * 2)  # radius dalam skala visual (2x)
+                    # BGR colors: Blue=(255,180,30), Red=(30,30,255)
                     if cls == 0:
                         box_color = (255, 180, 30)  # biru (B=255)
                         text = "BLUE"
                     else:
                         box_color = (30, 30, 255)   # merah (R=255)
                         text = "RED"
-                    cv2.rectangle(vis, (x1, y1), (x2, y2), box_color, 3)
+                    # Draw circle overlay instead of rectangle
+                    cv2.circle(vis, (center_x, center_y), radius, box_color, 3)
+                    # Draw center point dot
+                    cv2.circle(vis, (center_x, center_y), 3, (255, 255, 255), -1)
                     # Label bg
-                    cv2.rectangle(vis, (x1 - 2, y1 - 20), (x1 + 56, y1), (0, 0, 0), -1)
-                    cv2.putText(vis, text, (x1 + 2, y1 - 4),
-                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, box_color, 2)
+                    cv2.rectangle(vis, (center_x - 25, center_y - radius - 20), (center_x + 25, center_y - radius), (0, 0, 0), -1)
+                    cv2.putText(vis, text, (center_x - 20, center_y - radius - 5),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.55, box_color, 3)
                 cv2.putText(vis, f"Frame {idx} - {name}  [{len(bx)} dots]",
                             (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
                 mode_text = "BLUE" if _label_mode[0] == 0 else "RED"
@@ -133,7 +137,7 @@ def main():
                 if event == cv2.EVENT_LBUTTONDOWN:
                     cls = _label_mode[0]
                     label = "BLUE" if cls == 0 else "RED"
-                    boxes.append((cls, x / 2, y / 2, 48, 48))
+                    boxes.append((cls, x / 2, y / 2, HERO_DOT_SIZE, HERO_DOT_SIZE))
                     print(f"    {label:4s} at ({x//2:3d}, {y//2:3d})")
 
             cv2.namedWindow("Label Minimap Heroes", cv2.WINDOW_NORMAL)
