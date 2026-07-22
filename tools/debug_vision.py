@@ -912,9 +912,8 @@ def draw_minimap_heroes(frame: np.ndarray, status: dict[str, Any],
             continue
         if px < mm_x or px > mm_x + mm_w or py < mm_y or py > mm_y + mm_h:
             continue
-        # Skip drawing dot & label if hero identity is unknown / unassigned
-        if not name or name == "?" or str(name).lower().startswith("unknown"):
-            continue
+        # Cek apakah identitas hero unknown
+        is_unknown = not name or name == "?" or str(name).lower().startswith("unknown")
 
         if team == "blue":
             outer_color = (255, 140, 60)
@@ -929,30 +928,31 @@ def draw_minimap_heroes(frame: np.ndarray, status: dict[str, Any],
             outer_color = (180, 180, 180)
             fill_color = (120, 120, 120)
 
-        # Dot + glow
+        # Dot + glow (selalu digambar meskipun status unknown)
         cv2.circle(frame, (px, py), glow_r, outer_color, thick_circle)
         cv2.circle(frame, (px, py), dot_r, fill_color, -1)
         cv2.circle(frame, (px, py), max(2, dot_r // 2), (255, 255, 255), -1)
 
-        # Label (readable font & clear padding)
-        if team == "jungle":
-            label = name if (name and not name.startswith("jungle")) else "jungle"
-        else:
-            label = name[:10]
-        extra = f" ({conf:.0%})" if conf < 0.8 else ""
-        text = f"{label}{extra}"
+        # Label teks hanya digambar jika identitas hero SUDAH diketahui (bukan unknown)
+        if not is_unknown:
+            if team == "jungle":
+                label = name if (name and not name.startswith("jungle")) else "jungle"
+            else:
+                label = name[:10]
+            extra = f" ({conf:.0%})" if conf < 0.8 else ""
+            text = f"{label}{extra}"
 
-        (tw, th), bl = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, fs, thick_text)
-        lx = px + dot_r + 5
-        ly = py + th // 3
-        pad = 5
+            (tw, th), bl = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, fs, thick_text)
+            lx = px + dot_r + 5
+            ly = py + th // 3
+            pad = 5
 
-        cv2.rectangle(frame, (lx - pad, ly - th - pad), (lx + tw + pad, ly + pad),
-                      (0, 0, 0), -1)
-        cv2.rectangle(frame, (lx - pad, ly - th - pad), (lx + tw + pad, ly + pad),
-                      outer_color, 1)
-        cv2.putText(frame, text, (lx, ly), cv2.FONT_HERSHEY_SIMPLEX,
-                    fs, (255, 255, 255), thick_text, cv2.LINE_AA)
+            cv2.rectangle(frame, (lx - pad, ly - th - pad), (lx + tw + pad, ly + pad),
+                          (0, 0, 0), -1)
+            cv2.rectangle(frame, (lx - pad, ly - th - pad), (lx + tw + pad, ly + pad),
+                          outer_color, 1)
+            cv2.putText(frame, text, (lx, ly), cv2.FONT_HERSHEY_SIMPLEX,
+                        fs, (255, 255, 255), thick_text, cv2.LINE_AA)
 
 
 def draw_minimap_hero_overlay(frame: np.ndarray, status: dict[str, Any]):

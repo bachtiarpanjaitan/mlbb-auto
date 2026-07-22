@@ -1,6 +1,17 @@
 """
-YOLOv11n Detector — MLBB Minimap Hero Detection
-Mendeteksi 2 class: blue_hero, red_hero
+YOLOv11n Detector — MLBB Minimap Detection
+Mendeteksi 11 class:
+  0  = blue_hero
+  1  = red_hero
+  2  = lord            (1 lokasi)
+  3  = turtle          (1 lokasi)
+  4  = thunder_fenrir  (2 lokasi: blue buff di kedua sisi)
+  5  = molten_fiend    (2 lokasi: red buff di kedua sisi)
+  6  = lithowanderer   (1 lokasi)
+  7  = crab            (2 lokasi)
+  8  = lava_golem      (2 lokasi)
+  9  = fire_beetle     (2 lokasi)
+  10 = horned_lizard   (2 lokasi)
 """
 
 from __future__ import annotations
@@ -14,9 +25,28 @@ import numpy as np
 logger = logging.getLogger("mlbb.vision.yolo_detector")
 
 
+# ── Class ID mapping ────────────────────────────────────────────────────────
+# Class 0-1  : hero (team = "blue"/"red", jungle_name = None)
+# Class 2-10 : jungle (team = "jungle", jungle_name = nama spesifik kamp)
+# Satu jungle_name bisa muncul di >1 koordinat (blue side & red side)
+YOLO_CLASS_MAP: dict[int, tuple[str, str | None]] = {
+    0:  ("blue",   None),
+    1:  ("red",    None),
+    2:  ("jungle", "lord"),
+    3:  ("jungle", "turtle"),
+    4:  ("jungle", "thunder_fenrir"),
+    5:  ("jungle", "molten_fiend"),
+    6:  ("jungle", "lithowanderer"),
+    7:  ("jungle", "crab"),
+    8:  ("jungle", "lava_golem"),
+    9:  ("jungle", "fire_beetle"),
+    10: ("jungle", "horned_lizard"),
+}
+
+
 class YOLOMinimapDetector:
     """
-    YOLOv11n wrapper untuk deteksi hero di minimap.
+    YOLOv11n wrapper untuk deteksi hero & jungle camp di minimap.
 
     Args:
         model_path: Path ke YOLO weights (.pt atau .onnx)
@@ -89,16 +119,21 @@ class YOLOMinimapDetector:
 
     def detect(
         self, minimap_img: np.ndarray,
-    ) -> list[tuple[str, int, int, int, float]]:
+    ) -> list[tuple[str, str | None, int, int, int, float]]:
         """
-        Detect hero dots in minimap.
+        Detect hero & jungle camp dots in minimap.
 
         Args:
             minimap_img: Cropped minimap image (BGR, 350x340 typical)
 
         Returns:
-            List of (team, cx, cy, radius, confidence)
-            team: "blue" or "red"
+            List of (team, jungle_name, cx, cy, radius, confidence)
+            - team        : "blue", "red", atau "jungle"
+            - jungle_name : nama spesifik kamp ("lord", "thunder_fenrir", dll.)
+                           atau None untuk hero
+            - cx, cy      : koordinat piksel pusat bounding box di minimap
+            Catatan: satu jungle_name bisa muncul di 2 cx,cy berbeda
+                     (mis. thunder_fenrir di blue side & red side)
         """
         if minimap_img is None or minimap_img.size == 0:
             return []
@@ -132,8 +167,8 @@ class YOLOMinimapDetector:
             cx = max(0, min(w - 1, cx))
             cy = max(0, min(h - 1, cy))
 
-            team = {0: "blue", 1: "red", 2: "jungle"}.get(cls_id, "unknown")
-            detections.append((team, cx, cy, r, conf))
+            team, jungle_name = YOLO_CLASS_MAP.get(cls_id, ("unknown", None))
+            detections.append((team, jungle_name, cx, cy, r, conf))
 
         return detections
 
@@ -155,6 +190,7 @@ if __name__ == "__main__":
     if mm is not None:
         detector = YOLOMinimapDetector()
         dets = detector.detect(mm)
-        print(f"Detected {len(dets)} heroes")
-        for team, cx, cy, r, conf in dets:
-            print(f"  {team}: ({cx},{cy}) r={r} conf={conf:.2f}")
+        print(f"Detected {len(dets)} objects")
+        for team, jungle_name, cx, cy, r, conf in dets:
+            label = f"{team}/{jungle_name}" if jungle_name else team
+            print(f"  {label}: ({cx},{cy}) r={r} conf={conf:.2f}")

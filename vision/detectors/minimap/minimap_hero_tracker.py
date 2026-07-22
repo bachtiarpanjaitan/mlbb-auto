@@ -53,10 +53,10 @@ AREA_MAX = 250
 
 # ── Template matching config ──
 # Ukuran icon hero di minimap (diameter dalam pixel)
-# Multi-scale untuk handle variasi resolusi
-ICON_SIZES = [16, 18, 20, 22, 24]  # tambah scale untuk finer matching
+# Multi-scale diperluas dari 14px s/d 28px untuk mendeteksi berbagai resolusi minimap
+ICON_SIZES = [14, 16, 18, 20, 22, 24, 26, 28]
 # Confidence threshold untuk template match dianggap valid
-MATCH_THRESHOLD = 0.35  # lebih rendah untuk recall, diverifikasi via border color
+MATCH_THRESHOLD = 0.28  # disesuaikan untuk recall & akurasi matching lebih tinggi
 # NMS overlap threshold (IoU)
 NMS_IOU_THRESHOLD = 0.3
 # Jarak minimum (pixel) antar deteksi untuk NMS
@@ -65,6 +65,26 @@ NMS_DISTANCE_THRESHOLD = 12
 SCORE_GRAY_WEIGHT = 0.55
 SCORE_EDGE_WEIGHT = 0.30
 SCORE_BORDER_WEIGHT = 0.15
+
+# ── Fixed Jungle Camps Registry (Koordinat Tetap Kamp Jungle di Minimap MLBB) ──
+# Land of Dawn minimap normalized 0-1 coordinates for static jungle objectives
+JUNGLE_CAMPS = [
+    {"id": "lord_pit", "name": "lord", "norm_x": 0.50, "norm_y": 0.22, "radius": 0.08},
+    {"id": "turtle_pit", "name": "turtle", "norm_x": 0.50, "norm_y": 0.78, "radius": 0.08},
+    {"id": "blue_buff_blue", "name": "thunder_fenrir", "norm_x": 0.28, "norm_y": 0.44, "radius": 0.07},
+    {"id": "red_buff_blue", "name": "molten_fiend", "norm_x": 0.38, "norm_y": 0.72, "radius": 0.07},
+    {"id": "blue_buff_red", "name": "thunder_fenrir", "norm_x": 0.72, "norm_y": 0.56, "radius": 0.07},
+    {"id": "red_buff_red", "name": "molten_fiend", "norm_x": 0.62, "norm_y": 0.28, "radius": 0.07},
+    {"id": "litho_center", "name": "lithowanderer", "norm_x": 0.50, "norm_y": 0.50, "radius": 0.07},
+    {"id": "crab_top", "name": "crab", "norm_x": 0.22, "norm_y": 0.22, "radius": 0.07},
+    {"id": "crab_bot", "name": "crab", "norm_x": 0.78, "norm_y": 0.78, "radius": 0.07},
+    {"id": "golem_blue", "name": "lava_golem", "norm_x": 0.22, "norm_y": 0.58, "radius": 0.07},
+    {"id": "golem_red", "name": "lava_golem", "norm_x": 0.78, "norm_y": 0.42, "radius": 0.07},
+    {"id": "beetle_blue", "name": "fire_beetle", "norm_x": 0.42, "norm_y": 0.84, "radius": 0.07},
+    {"id": "beetle_red", "name": "fire_beetle", "norm_x": 0.58, "norm_y": 0.16, "radius": 0.07},
+    {"id": "lizard_blue", "name": "horned_lizard", "norm_x": 0.18, "norm_y": 0.40, "radius": 0.07},
+    {"id": "lizard_red", "name": "horned_lizard", "norm_x": 0.82, "norm_y": 0.60, "radius": 0.07},
+]
 
 
 @dataclass
@@ -658,54 +678,106 @@ class MinimapHeroTracker:
 
     def _detect_circles_fast(
         self, minimap_img: np.ndarray,
-    ) -> list[tuple[str, int, int, int]]:
-        """Detect via YOLO (async cache) or HSV (fallback)."""
+    ) -> list[tuple[str, str | None, int, int, int]]:
+        """Detect via YOLO (async cache) + HSV jungle & fallback.
+
+        Returns list of (team, jungle_name, cx, cy, radius).
+        jungle_name is the specific camp name from YOLO class (e.g. 'thunder_fenrir'),
+        or None for hero dots and HSV-only detections.
+        """
         if minimap_img is None or minimap_img.size == 0:
             return []
-        # YOLO: deteksi langsung pada frame saat ini agar koordinat presisi dan tidak lag
+
+        result: list[tuple[str, str | None, int, int, int]] = []
+
+        # 1. YOLO detections (pure model-driven detection for heroes & jungle)
         if self._yolo_detector is not None:
             dets = self._yolo_detector.detect(minimap_img)
-            result = [(team, cx, cy, r) for team, cx, cy, r, _ in dets]
-            result.sort(key=lambda x: -x[3])
-            final, used = [], []
-            for team, cx, cy, r in result:
-                if len(final) >= 14: break
-                if all((cx-ux)**2+(cy-uy)**2>144 for ux,uy in used):
-                    final.append((team, cx, cy, r)); used.append((cx, cy))
-            return final
-        # HSV fallback
+            result = []
+            for team, jungle_name, cx, cy, r, _ in dets:
+                result.append((team, jungle_name, cx, cy, r))
+            return result
+
+        # 2. HSV detection fallback (ONLY when YOLO is NOT loaded)
         import numpy as np, cv2
         h, w = minimap_img.shape[:2]
         hsv = cv2.cvtColor(minimap_img, cv2.COLOR_BGR2HSV)
         gray = cv2.cvtColor(minimap_img, cv2.COLOR_BGR2GRAY)
-        k = np.ones((3,3), np.uint8)
-        bm = cv2.morphologyEx(cv2.inRange(hsv,(85,80,80),(115,255,255)), cv2.MORPH_OPEN, k)
-        r1 = cv2.morphologyEx(cv2.inRange(hsv,(150,60,80),(180,255,255)), cv2.MORPH_OPEN, k)
-        r2 = cv2.morphologyEx(cv2.inRange(hsv,(0,60,80),(10,255,255)), cv2.MORPH_OPEN, k)
-        for m in [bm, r1|r2]:
-            cv2.rectangle(m,(0,0),(w,8),0,-1); cv2.rectangle(m,(0,h-8),(w,h),0,-1)
-        def ff(mask, mc):
+        k = np.ones((3, 3), np.uint8)
+
+        gm = cv2.inRange(hsv, (25, 30, 30), (90, 255, 255))    # Green / Yellow / Lime
+        pm = cv2.inRange(hsv, (110, 30, 30), (150, 255, 255))  # Purple buff
+        om = cv2.inRange(hsv, (10, 50, 50), (25, 255, 255))    # Orange / Amber
+        jm = cv2.morphologyEx(gm | pm | om, cv2.MORPH_OPEN, k)
+
+        cv2.rectangle(jm, (0, 0), (w, 8), 0, -1)
+        cv2.rectangle(jm, (0, h - 8), (w, h), 0, -1)
+
+        def ff_jungle(mask):
             dots = []
             for cnt in cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]:
                 a = cv2.contourArea(cnt)
-                if a < 30 or a > 400: continue
-                p = cv2.arcLength(cnt, True)
-                if p == 0 or 4*np.pi*a/(p*p) < mc: continue
+                if a < 6 or a > 450:
+                    continue
                 M = cv2.moments(cnt)
-                if M["m00"] == 0: continue
-                cx, cy = int(M["m10"]/M["m00"]), int(M["m01"]/M["m00"])
-                face = gray[max(0,cy-3):cy+3, max(0,cx-3):cx+3]
-                if face.size > 0 and face.mean() < 35: continue
-                dots.append((cx, cy, max(6,int((a/np.pi)**0.5))))
+                if M["m00"] == 0:
+                    continue
+                cx, cy = int(M["m10"] / M["m00"]), int(M["m01"] / M["m00"])
+                dots.append((cx, cy, max(6, int((a / np.pi) ** 0.5))))
             return dots
-        blue = ff(bm, 0.55); red = ff(r1|r2, 0.40)
-        result = [("blue", *d) for d in blue] + [("red", *d) for d in red]
-        result.sort(key=lambda x: -x[3])
-        final, used = [], []
-        for team, cx, cy, r in result:
-            if len(final) >= 14: break
-            if all((cx-ux)**2+(cy-uy)**2>144 for ux,uy in used):
-                final.append((team, cx, cy, r)); used.append((cx, cy))
+
+        # HSV jungle dots carry None jungle_name (will be resolved via coord snapping)
+        jungle_hsv: list[tuple[str, str | None, int, int, int]] = [
+            ("jungle", None, cx, cy, r) for cx, cy, r in ff_jungle(jm)
+        ]
+
+        # If YOLO was not loaded, also compute HSV blue/red
+        if self._yolo_detector is None:
+            bm = cv2.morphologyEx(cv2.inRange(hsv, (85, 80, 80), (115, 255, 255)), cv2.MORPH_OPEN, k)
+            r1 = cv2.morphologyEx(cv2.inRange(hsv, (150, 60, 80), (180, 255, 255)), cv2.MORPH_OPEN, k)
+            r2 = cv2.morphologyEx(cv2.inRange(hsv, (0, 60, 80), (10, 255, 255)), cv2.MORPH_OPEN, k)
+            for m in [bm, r1 | r2]:
+                cv2.rectangle(m, (0, 0), (w, 8), 0, -1)
+                cv2.rectangle(m, (0, h - 8), (w, h), 0, -1)
+
+            def ff_hero(mask, mc):
+                dots = []
+                for cnt in cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0]:
+                    a = cv2.contourArea(cnt)
+                    if a < 12 or a > 400:
+                        continue
+                    p = cv2.arcLength(cnt, True)
+                    if p == 0 or 4 * np.pi * a / (p * p) < mc:
+                        continue
+                    M = cv2.moments(cnt)
+                    if M["m00"] == 0:
+                        continue
+                    cx, cy = int(M["m10"] / M["m00"]), int(M["m01"] / M["m00"])
+                    face = gray[max(0, cy - 3):cy + 3, max(0, cx - 3):cx + 3]
+                    if face.size > 0 and face.mean() < 35:
+                        continue
+                    dots.append((cx, cy, max(6, int((a / np.pi) ** 0.5))))
+                return dots
+
+            blue = ff_hero(bm, 0.55)
+            red = ff_hero(r1 | r2, 0.40)
+            result.extend([("blue", None, *d) for d in blue] + [("red", None, *d) for d in red])
+
+        # Add HSV jungle dots if not overlapping with existing YOLO detections
+        for team, jname, cx, cy, r in jungle_hsv:
+            if not any(abs(cx - ux) < 12 and abs(cy - uy) < 12
+                       for _, _, ux, uy, _ in result):
+                result.append((team, jname, cx, cy, r))
+
+        result.sort(key=lambda x: -x[4])
+        final: list[tuple[str, str | None, int, int, int]] = []
+        used: list[tuple[int, int]] = []
+        for team, jname, cx, cy, r in result:
+            if len(final) >= 20:
+                break
+            if all((cx - ux) ** 2 + (cy - uy) ** 2 > 100 for ux, uy in used):
+                final.append((team, jname, cx, cy, r))
+                used.append((cx, cy))
         return final
     def detect_heroes(
         self,
@@ -745,11 +817,12 @@ class MinimapHeroTracker:
             self._last_circles = []
             return []
 
-        self._last_circles = [(team, cx, cy, r) for team, cx, cy, r in raw_circles]
+        self._last_circles = [(team, cx, cy, r) for team, _jn, cx, cy, r in raw_circles
+                               if team != "jungle"]
 
         raw_matches: list[_PortraitMatch] = []
 
-        for team, cx, cy, r in raw_circles:
+        for team, _jn, cx, cy, r in raw_circles:
             # ── Team heroes lookup ──
             team_heroes = [n for n, t in self._roster.items() if t == team]
 
@@ -769,16 +842,14 @@ class MinimapHeroTracker:
             best_score = 0.0
             best_scale = 0
 
-            # ── Template matching: 2 scales only (18, 20) ──
-            _FAST_SCALES = [1, 2]  # index di icon_sizes untuk scale 18px dan 20px
-
+            # ── Template matching: cek semua skala di self.icon_sizes ──
             for hero_name in team_heroes:
                 templates = self._circle_templates.get(hero_name)
                 if not templates:
                     continue
                 gray_tmpls = templates.get('gray', [])
 
-                for scale_idx in _FAST_SCALES:
+                for scale_idx in range(len(self.icon_sizes)):
                     if scale_idx >= len(gray_tmpls) or scale_idx >= len(self._circle_masks):
                         continue
                     tg = gray_tmpls[scale_idx]
@@ -813,7 +884,7 @@ class MinimapHeroTracker:
         final_matches = self._nms_portrait_matches(raw_matches)
 
         # Store circles for debug
-        self._last_circles = [(cx, cy, r) for _, cx, cy, r in raw_circles]
+        self._last_circles = [(cx, cy, r) for _, _jn, cx, cy, r in raw_circles]
 
         return final_matches
 
@@ -1106,23 +1177,40 @@ class MinimapHeroTracker:
 
         return matched
 
+    def _find_matching_camp(self, nx: float, ny: float, name_filter: str | None = None) -> dict | None:
+        """Cari apakah koordinat (nx, ny) berada di lokasi kamp jungle tetap."""
+        for camp in JUNGLE_CAMPS:
+            if name_filter is not None and camp["name"] != name_filter:
+                continue
+            dist = ((nx - camp["norm_x"]) ** 2 + (ny - camp["norm_y"]) ** 2) ** 0.5
+            if dist <= camp["radius"]:
+                return camp
+        return None
+
     def _update_jungle_tracking(
         self,
-        jungle_dots: list[tuple[str, int, int, int]],
+        jungle_dots: list[tuple[str, str | None, int, int, int]],
         frame_idx: int,
         minimap_img: np.ndarray | None = None,
     ):
         """
-        Track jungle objectives (turtle, lord, buffs, crab) dan cocokkan ikonnya
-        dengan template dari assets/creeps_minimap/.
+        Track jungle objectives secara presisi & bebas flickering.
+
+        Prioritas nama:
+          1. jungle_name dari YOLO class (paling akurat — model yang sudah belajar)
+          2. Coordinate snapping via JUNGLE_CAMPS (fallback untuk HSV detections)
+          3. Template matching _identify_creep (last resort)
         """
         matched_keys: set[str] = set()
+        used_dot_indices: set[int] = set()
 
-        # NN match existing tracked jungle to new dots
+        # 1. Match existing tracked jungle items to new dots
         for key, jobj in list(self._tracked_jungle.items()):
-            best_dist = 0.08  # threshold normalized distance
+            best_dist = 0.08  # threshold distance
             best_idx = -1
-            for i, (_, cx, cy, r) in enumerate(jungle_dots):
+            for i, (_, _jname, cx, cy, r) in enumerate(jungle_dots):
+                if i in used_dot_indices:
+                    continue
                 nx = cx / max(1, self._mm_w)
                 ny = cy / max(1, self._mm_h)
                 dist = ((nx - jobj.norm_x) ** 2 + (ny - jobj.norm_y) ** 2) ** 0.5
@@ -1131,58 +1219,104 @@ class MinimapHeroTracker:
                     best_idx = i
 
             if best_idx >= 0:
-                _, cx, cy, r = jungle_dots[best_idx]
+                used_dot_indices.add(best_idx)
+                _, jungle_name, cx, cy, r = jungle_dots[best_idx]
                 nx = cx / max(1, self._mm_w)
                 ny = cy / max(1, self._mm_h)
-                jobj.smooth_position(nx, ny)
+
+                # Priority 1: YOLO class name (most accurate)
+                if jungle_name is not None:
+                    target_nx, target_ny = nx, ny
+                    jobj.name = jungle_name
+                    jobj.confidence = 0.90
+                else:
+                    # Priority 2: coordinate snapping
+                    camp = self._find_matching_camp(nx, ny, name_filter=jungle_name)
+                    if camp:
+                        target_nx, target_ny = camp["norm_x"], camp["norm_y"]
+                        if jobj.name is None or jobj.name.startswith("jungle"):
+                            jobj.name = camp["name"]
+                            jobj.confidence = 0.80
+                    else:
+                        target_nx, target_ny = nx, ny
+                        # Priority 3: template matching
+                        if jobj.name is None or jobj.name.startswith("jungle") or jobj.confidence < 0.6:
+                            c_name, c_conf = self._identify_creep(minimap_img, cx, cy)
+                            if c_name != "jungle":
+                                jobj.name = c_name
+                                jobj.confidence = c_conf
+
+                jobj.smooth_alpha = 0.15
+                jobj.smooth_position(target_nx, target_ny)
                 jobj.last_seen_frame = frame_idx
                 jobj.frames_alive += 1
                 jobj.miss_count = 0
-
-                # Re-verify/identify creep identity if currently generic
-                if jobj.name is None or jobj.name.startswith("jungle") or jobj.confidence < 0.6:
-                    c_name, c_conf = self._identify_creep(minimap_img, cx, cy)
-                    if c_name != "jungle":
-                        jobj.name = c_name
-                        jobj.confidence = c_conf
                 matched_keys.add(key)
 
-        # New jungle dots → create tracked entries
-        for _, cx, cy, r in jungle_dots:
+        # 2. New jungle dots → create tracked entries
+        for i, (_, jungle_name, cx, cy, r) in enumerate(jungle_dots):
+            if i in used_dot_indices:
+                continue
             nx = cx / max(1, self._mm_w)
             ny = cy / max(1, self._mm_h)
-            # Check if already matched to existing
-            already = False
-            for key in matched_keys:
-                jobj = self._tracked_jungle.get(key)
-                if jobj and ((nx - jobj.norm_x) ** 2 + (ny - jobj.norm_y) ** 2) ** 0.5 < 0.06:
-                    already = True
-                    break
-            if already:
-                continue
 
-            c_name, c_conf = self._identify_creep(minimap_img, cx, cy)
-            if c_name == "jungle":
-                self._jungle_counter += 1
-                name = f"jungle_{self._jungle_counter}"
+            # Priority 1: YOLO class name
+            if jungle_name is not None:
+                # Use jungle_name + coordinate as key to support same-type at 2 locations
+                # Snap to nearest known position of that type
+                camp = self._find_matching_camp(nx, ny, name_filter=jungle_name)
+                if camp:
+                    key = camp["id"]          # e.g. "blue_buff_blue"
+                    target_nx, target_ny = camp["norm_x"], camp["norm_y"]
+                else:
+                    # Unknown location for this jungle type (non-standard map?)
+                    # Use quantized coord as key
+                    key = f"{jungle_name}_{int(nx * 10)}_{int(ny * 10)}"
+                    target_nx, target_ny = nx, ny
+                display_name = jungle_name
+                conf = 0.90
             else:
-                name = c_name
+                # Priority 2: coordinate snapping (HSV fallback)
+                camp = self._find_matching_camp(nx, ny)
+                if camp:
+                    key = camp["id"]
+                    target_nx, target_ny = camp["norm_x"], camp["norm_y"]
+                    display_name = camp["name"]
+                    conf = 0.80
+                else:
+                    # Check if close to any existing tracked item
+                    if any(((nx - j.norm_x) ** 2 + (ny - j.norm_y) ** 2) ** 0.5 < 0.08
+                           for j in self._tracked_jungle.values()):
+                        continue
+                    c_name, conf = self._identify_creep(minimap_img, cx, cy)
+                    self._jungle_counter += 1
+                    key = f"jungle_spot_{self._jungle_counter}"
+                    target_nx, target_ny = nx, ny
+                    display_name = c_name if c_name != "jungle" else f"jungle_{self._jungle_counter}"
 
-            jobj = TrackedMinimapHero(
-                name=name, team="jungle",
-                norm_x=nx, norm_y=ny,
-                last_seen_frame=frame_idx,
-                first_seen_frame=frame_idx,
-                frames_alive=1, confidence=c_conf,
-                smooth_alpha=0.4,
-            )
-            self._tracked_jungle[name] = jobj
+            if key in self._tracked_jungle:
+                jobj = self._tracked_jungle[key]
+                jobj.last_seen_frame = frame_idx
+                jobj.frames_alive += 1
+                jobj.miss_count = 0
+            else:
+                jobj = TrackedMinimapHero(
+                    name=display_name, team="jungle",
+                    norm_x=target_nx, norm_y=target_ny,
+                    last_seen_frame=frame_idx,
+                    first_seen_frame=frame_idx,
+                    frames_alive=1, confidence=conf,
+                    smooth_alpha=0.15,
+                )
+                self._tracked_jungle[key] = jobj
+            matched_keys.add(key)
 
-        # Increment miss + cleanup dead jungle objectives (shorter timeout)
+        # 3. Increment miss + cleanup dead jungle objectives
         for key, jobj in list(self._tracked_jungle.items()):
             if key not in matched_keys:
                 jobj.miss_count += 1
-        dead = [k for k, j in self._tracked_jungle.items() if j.miss_count >= 3]
+        dead = [k for k, j in self._tracked_jungle.items()
+                if j.miss_count >= max(12, self.max_miss_frames)]
         for k in dead:
             del self._tracked_jungle[k]
 
@@ -1215,17 +1349,17 @@ class MinimapHeroTracker:
         raw_dots = self._detect_circles_fast(minimap_img)  # [(team, cx, cy, r), ...]
 
         # Separate jungle dots from hero dots
-        all_dots = [(t, cx, cy, r) for t, cx, cy, r in raw_dots if t != "jungle"]
-        jungle_dots = [(t, cx, cy, r) for t, cx, cy, r in raw_dots if t == "jungle"]
+        all_dots = [(t, jn, cx, cy, r) for t, jn, cx, cy, r in raw_dots if t != "jungle"]
+        jungle_dots = [(t, jn, cx, cy, r) for t, jn, cx, cy, r in raw_dots if t == "jungle"]
 
-        self._last_circles = [(cx, cy, r) for _, cx, cy, r in all_dots]
+        self._last_circles = [(cx, cy, r) for _, _jn, cx, cy, r in all_dots]
 
         # ── Track jungle objectives (simple position tracking + creep template matching) ──
         self._update_jungle_tracking(jungle_dots, frame_idx, minimap_img)
 
         # ── Motion filter: reject static terrain via position variance ──
         self._pos_history_frames += 1
-        for _, cx, cy, _ in all_dots:
+        for _, _jn, cx, cy, _ in all_dots:
             key = (cx//16*16, cy//16*16)
             if key not in self._pos_history:
                 self._pos_history[key] = []
@@ -1250,7 +1384,7 @@ class MinimapHeroTracker:
         for hero in stable_heroes:
             best_dist = self.match_distance
             best_idx = -1
-            for i, (team, cx, cy, r) in enumerate(all_dots):
+            for i, (team, _jn, cx, cy, r) in enumerate(all_dots):
                 if i in used_dots or team != hero.team:
                     continue
                 nx, ny = cx / max(1, self._mm_w), cy / max(1, self._mm_h)
@@ -1260,7 +1394,7 @@ class MinimapHeroTracker:
                     best_idx = i
 
             if best_idx >= 0:
-                _, cx, cy, r = all_dots[best_idx]
+                _, _jn, cx, cy, r = all_dots[best_idx]
                 used_dots.add(best_idx)
                 matched_names.add(hero.name)
 
@@ -1273,7 +1407,7 @@ class MinimapHeroTracker:
 
         # ── 3. Sisa circles -> template matching untuk identity ──
         remaining_dots = [
-            (team, cx, cy, r) for i, (team, cx, cy, r) in enumerate(all_dots)
+            (team, cx, cy, r) for i, (team, _jn, cx, cy, r) in enumerate(all_dots)
             if i not in used_dots
         ]
 
@@ -1288,7 +1422,8 @@ class MinimapHeroTracker:
                 if not team_heroes:
                     continue
 
-                half = 14; px1, py1 = max(0, cx-half), max(0, cy-half)
+                half = max(16, max(self.icon_sizes) // 2 + 2)
+                px1, py1 = max(0, cx-half), max(0, cy-half)
                 px2, py2 = min(w, cx+half), min(h, cy+half)
                 patch = gray_eq[py1:py2, px1:px2]; ph, pw = patch.shape[:2]
                 if ph < 6 or pw < 6:
@@ -1300,7 +1435,7 @@ class MinimapHeroTracker:
                     templates = self._circle_templates.get(hero_name)
                     if not templates: continue
                     gray_tmpls = templates.get('gray', [])
-                    for scale_idx in (1, 2):  # scales 18, 20
+                    for scale_idx in range(len(self.icon_sizes)):
                         if scale_idx >= len(gray_tmpls) or scale_idx >= len(self._circle_masks):
                             continue
                         tg, mask = gray_tmpls[scale_idx], self._circle_masks[scale_idx]
@@ -1343,7 +1478,7 @@ class MinimapHeroTracker:
         ]
         if unmatched_tracked:
             for team in ("blue", "red"):
-                avail = [(cx, cy) for t, cx, cy, r in all_dots if t == team
+                avail = [(cx, cy) for t, _jn, cx, cy, r in all_dots if t == team
                          and not any(abs(cx - int(mh.norm_x*self._mm_w)) < NMS_DISTANCE_THRESHOLD
                                      and abs(cy - int(mh.norm_y*self._mm_h)) < NMS_DISTANCE_THRESHOLD
                                      for mn in matched_names for mh in [self._tracked.get(mn)] if mh)]
@@ -1361,17 +1496,22 @@ class MinimapHeroTracker:
                     h.confidence = min(1.0, h.frames_alive * 0.04 + 0.5)
 
         # ── 5. Sisa dots: assign ke unknown (JANGAN tebak acak nama hero dari roster) ──
-        for team, cx, cy, r in all_dots:
-            if any(i in used_dots for i, (t, cxc, cyc, rc) in enumerate(all_dots) if (cxc, cyc) == (cx, cy)):
+        for team, _jn, cx, cy, r in all_dots:
+            if any(i in used_dots for i, (t, _jn2, cxc, cyc, rc) in enumerate(all_dots) if (cxc, cyc) == (cx, cy)):
                 continue
             if matched_names and any(abs(cx - int(mh.norm_x*self._mm_w)) < NMS_DISTANCE_THRESHOLD
                                      and abs(cy - int(mh.norm_y*self._mm_h)) < NMS_DISTANCE_THRESHOLD
                                      for mn in matched_names for mh in [self._tracked.get(mn)] if mh):
                 continue
             
-            # Jika template matching tidak cocok, buat sebagai unknown (bukan asal tebak roster)
-            self._unknown_counter = getattr(self, "_unknown_counter", 0) + 1
-            name = f"unknown_{team}_{self._unknown_counter}"
+            # Roster elimination: jika hanya ada 1 hero di roster tim yang belum matched, assign ke hero tersebut
+            unassigned_team = [n for n in self._roster_unassigned if self._roster.get(n) == team]
+            if len(unassigned_team) == 1:
+                name = unassigned_team[0]
+                self._roster_unassigned.discard(name)
+            else:
+                self._unknown_counter = getattr(self, "_unknown_counter", 0) + 1
+                name = f"unknown_{team}_{self._unknown_counter}"
             
             nx, ny = self._normalize(cx, cy)
             h = TrackedMinimapHero(name=name, team=team, norm_x=nx, norm_y=ny,
@@ -1400,9 +1540,9 @@ class MinimapHeroTracker:
         if minimap_img is not None and minimap_img.size > 0:
             hh, ww = minimap_img.shape[:2]
 
-        blue_dots = [(cx, cy) for t, cx, cy, r in all_dots if t == "blue"]
-        red_dots = [(cx, cy) for t, cx, cy, r in all_dots if t == "red"]
-        jungle_dots_debug = [(cx, cy) for t, cx, cy, r in jungle_dots]
+        blue_dots = [(cx, cy) for t, _jn, cx, cy, r in all_dots if t == "blue"]
+        red_dots = [(cx, cy) for t, _jn, cx, cy, r in all_dots if t == "red"]
+        jungle_dots_debug = [(cx, cy) for t, _jn, cx, cy, r in jungle_dots]
 
         for h in self._tracked.values():
             if h.miss_count < self.max_miss_frames:
