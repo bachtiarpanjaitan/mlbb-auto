@@ -1,8 +1,7 @@
 """
-PaddleOCR Wrapper — Text detection dan recognition.
+Tesseract OCR Reader — Text detection dan recognition via pytesseract.
 
-Menggunakan PaddleOCR v3.7+ untuk text recognition.
-Fallback ke threshold-based digit OCR jika PaddleOCR gagal.
+Engine: Tesseract (pytesseract) — ringan, cepat untuk digit dan text pendek.
 """
 
 from __future__ import annotations
@@ -16,49 +15,34 @@ import numpy as np
 
 logger = logging.getLogger("mlbb.vision.ocr")
 
-# ---------- Main OCR Class ----------
+# Tesseract config per hint type
+_TESS_CONFIGS = {
+    "number":    "--psm 7 --oem 3 -c tessedit_char_whitelist=0123456789",
+    "clock":     "--psm 7 --oem 3 -c tessedit_char_whitelist=0123456789:",
+    "kda":       "--psm 7 --oem 3 -c tessedit_char_whitelist=0123456789/",
+    "text":      "--psm 7 --oem 3",
+    "countdown": "--psm 10 --oem 3 digits",
+}
 
 
 class OCRReader:
     """
-    OCR Reader dengan PaddleOCR sebagai engine utama.
+    OCR Reader dengan Tesseract (pytesseract) sebagai engine.
 
     Args:
-        use_paddle: True = aktifkan PaddleOCR (otomatis jika terinstall).
-        lang: Bahasa untuk PaddleOCR (default: 'en').
+        lang: Bahasa (default: 'eng').
     """
 
-    def __init__(self, use_paddle: bool = True, lang: str = "en"):
-        self._reader: Any = None
-        self._use_paddle = use_paddle
+    def __init__(self, lang: str = "eng"):
         self._lang = lang
-
-        if use_paddle:
-            self._init_paddle()
-
-    def _init_paddle(self):
-        """Init PaddleOCR (PP-OCRv6)."""
-        try:
-            from paddleocr import PaddleOCR
-            self._reader = PaddleOCR(
-                use_textline_orientation=False,
-                lang=self._lang,
-            )
-            logger.info("✅ PaddleOCR initialized (v3.7+)")
-        except ImportError:
-            logger.warning("PaddleOCR not installed, using fallback OCR")
-            self._use_paddle = False
-        except Exception as e:
-            logger.warning("PaddleOCR init failed: %s, using fallback", e)
-            self._use_paddle = False
 
     def read(self, image: np.ndarray, hint: str = "text") -> str | None:
         """
-        Read text from image region.
+        Read text from image region using Tesseract.
 
         Args:
             image: Cropped region image (BGR).
-            hint: Type hint — "clock", "number", "kda", "text", "speed", "countdown".
+            hint: Type hint — "clock", "number", "kda", "text", "countdown".
 
         Returns:
             Recognized text string or None.
@@ -66,64 +50,52 @@ class OCRReader:
         if image is None or image.size == 0:
             return None
 
-        # Try PaddleOCR
-        if self._use_paddle and self._reader is not None:
-            try:
-                result = self._predict(image)
-                if result:
-                    return result
-            except Exception as e:
-                logger.debug("PaddleOCR error: %s", e)
-
-        # Fallback digit OCR
         gray = image if image.ndim == 2 else cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        if hint in ("clock", "number", "kda", "speed", "countdown"):
-            return self._fallback_digits(gray, hint)
+
+        # Preprocess untuk tesseract
+        processed = self._preprocess(gray, hint)
+
+        config = _TESS_CONFIGS.get(hint, _TESS_CONFIGS["text"])
+
+        try:
+            import pytesseract
+            text = pytesseract.image_to_string(
+                processed, lang=self._lang, config=config
+            ).strip()
+            if text:
+                return text
+        except Exception as e:
+            logger.debug("Tesseract error: %s", e)
 
         return None
 
-    def _predict(self, image: np.ndarray) -> str | None:
-        """Run PaddleOCR inference (v3.7+ OCRResult format)."""
-        raw = self._reader.ocr(image)
+    def _preprocess(self, gray: np.ndarray, hint: str) -> np.ndarray:
+        """
+        Preprocess image untuk tesseract berdasarkan hint.
 
-        if not raw or not isinstance(raw, list):
-            return None
+        - number/kda: threshold + invert (text putih di background gelap)
+        - text: contrast enhancement
+        """
+        # Resize biar lebih jelas
+        h, w = gray.shape
+        if w < 40:
+            scale = max(1.0, 60 / w)
+            gray = cv2.resize(gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
 
-        texts = []
-        for page in raw:
-            # PaddleOCR v3.7 returns OCRResult objects with .rec_texts
-            if hasattr(page, "rec_texts") and isinstance(page.rec_texts, list):
-                texts.extend(str(t) for t in page.rec_texts if t is not None)
-            # Fallback: dict-style result
-            elif isinstance(page, dict):
-                for t in page.get("rec_texts", page.get("data", [])):
-                    if isinstance(t, dict):
-                        texts.append(str(t.get("text", "")))
-                    elif isinstance(t, str):
-                        texts.append(t)
+        if hint in ("number", "clock", "kda", "countdown"):
+            # OTSU threshold untuk pisah angka putih dari background
+            _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
-        if not texts:
-            return None
+            # Invert kalau text putih di background gelap
+            white_px = cv2.countNonZero(binary)
+            if white_px > binary.size * 0.5:
+                binary = 255 - binary
 
-        return " ".join(texts)
+            return binary
 
-    def _fallback_digits(self, gray: np.ndarray, hint: str) -> str | None:
-        """Basic digit OCR via contour analysis."""
-        _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-
-        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        digits = []
-        for cnt in contours:
-            x, y, w, h = cv2.boundingRect(cnt)
-            if h > 10 and w > 4 and w < gray.shape[1] * 0.6:
-                digits.append((x, y))
-
-        if not digits:
-            return None
-
-        # Simple heuristic: return number of distinct regions found
-        # This is a placeholder — PaddleOCR handles real use cases
-        return None
+        # Text: contrast stretching
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        return clahe.apply(gray)
 
     def read_as_int(self, image: np.ndarray, hint: str = "number") -> int | None:
         """Read text and parse as integer."""

@@ -1,10 +1,10 @@
 """
-MLBB Vision — Coordinate Grid Tool + Hero Status Overlay
-Tampilkan grid, region hero_panel, dan status deteksi hero di overlay kiri.
+MLBB Vision — Coordinate Grid Tool + Hero Status Overlay + Team Roster
+Tampilkan grid, region hero_panel, status deteksi hero, dan team roster (blue/red) di overlay.
 """
 
 from __future__ import annotations
-import sys, os, argparse, logging, yaml
+import sys, os, argparse, logging, yaml, time
 from typing import Any
 import threading, queue
 from concurrent.futures import ThreadPoolExecutor
@@ -19,6 +19,9 @@ from vision.ocr.reader import OCRReader
 from vision.detectors import HPDetector, ManaDetector, LevelDetector, GoldDetector
 from vision.detectors import SkillsDetector
 from vision.matcher.template import TemplateMatcher
+from vision.detectors.team.blue_team import BlueTeamDetector
+from vision.trackers.team_hp_tracker import TeamHPTracker, create_team_hp_tracker
+from vision.core.frame_reader import FrameReader
 import json
 
 logging.basicConfig(level=logging.WARNING)
@@ -32,7 +35,7 @@ class DetectorManager:
     """Run all hero_panel detectors on a frame and collect status."""
 
     def __init__(self):
-        self.ocr = OCRReader(use_paddle=False)
+        self.ocr = OCRReader()
         self.hp_det = HPDetector(self.ocr)
         self.mana_det = ManaDetector(self.ocr)
         self.level_det = LevelDetector(self.ocr)
@@ -134,11 +137,12 @@ class DetectorManager:
         if spell_templates:
             self._spell_matcher = TemplateMatcher(threshold=0.35, templates=spell_templates)
 
+        # ── Blue Team Detector (5 hero portraits from scoreboard) ──
+        self.blue_team_detector = BlueTeamDetector(confidence_threshold=0.35)
+
         # ── Cached identified battle spell ──
         self._cached_spell_key: str | None = None
         self._cached_spell_cd: float | None = None
-
-        log.info("Detectors initialized")
 
         # ── Cooldown tracker ──
         self._cd_timers: dict[str, float] = {}  # skill_name -> end_timestamp
@@ -154,6 +158,8 @@ class DetectorManager:
         self._cd_ocr_last_time: dict[str, float] = {}
         self._cd_ocr_results: dict[str, tuple[float, int]] = {}  # skill_name -> (video_time, remaining_sec)
         self._CD_OCR_INTERVAL = 1.0
+
+        log.info("Detectors initialized")
 
     def detect(self, frame: np.ndarray, video_time: float = 0) -> dict[str, Any]:
         """Run all detectors on a frame and return status dict."""
@@ -242,6 +248,52 @@ class DetectorManager:
             result = self.gold_det.run(gold_img)
             if result and result.value is not None:
                 status["gold"] = result.value
+
+        # ── Blue Team Detection (scoreboard portraits) ──
+        # Scan every 3 seconds until all 5 heroes found
+        if not hasattr(self, '_blue_team_scanned'):
+            self._blue_team_scanned = False
+            self._blue_team_last_scan = 0.0
+            self._blue_team_heroes = []  # list of {"name": str, "slot": int, "confidence": float}
+            log.info("🔍 Blue team scanner initialized (scan every 3s video time)")
+
+        if not self._blue_team_scanned and video_time - self._blue_team_last_scan >= 3.0:
+            self._blue_team_last_scan = video_time
+            log.info("🔍 Blue team scan at video_time=%.1fs (frame=%d)", video_time, int(video_time * 30))
+            # Run blue team detector on full frame
+            blue_result = self.blue_team_detector.detect(frame)
+            if blue_result and blue_result.value:
+                heroes = blue_result.value.get("heroes", [])
+                detected = [h for h in heroes if h.get("hero_name")]
+                log.info("  Blue team raw result: %d heroes total, %d matched",
+                         len(heroes), len(detected))
+                for h in heroes:
+                    if h.get("hero_name"):
+                        log.info("  ✅ Slot %d: %s (conf=%.2f)", h["slot"], h["hero_name"], h["confidence"])
+                    else:
+                        log.info("  ❌ Slot %d: NO MATCH (conf=%.2f)", h["slot"], h["confidence"])
+                for h in detected:
+                    # Merge with existing (keep highest confidence per slot)
+                    existing = next((x for x in self._blue_team_heroes if x["slot"] == h["slot"]), None)
+                    if not existing or h["confidence"] > existing["confidence"]:
+                        if existing:
+                            self._blue_team_heroes.remove(existing)
+                        self._blue_team_heroes.append({
+                            "name": h["hero_name"],
+                            "slot": h["slot"],
+                            "confidence": h["confidence"],
+                        })
+                log.info("Blue team scan result: %d/5 heroes found", len(self._blue_team_heroes))
+                if len(self._blue_team_heroes) >= 5:
+                    self._blue_team_scanned = True
+                    log.info("✅ Blue team complete: %s",
+                             ", ".join([f"{h['name']}(slot{h['slot']})" for h in self._blue_team_heroes]))
+            else:
+                log.warning("  Blue team detector returned no result (image size=%s)", frame.shape[:2] if frame is not None else "None")
+
+        # Add blue team heroes to status for overlay
+        status["blue_team_heroes"] = self._blue_team_heroes
+        status["blue_team_complete"] = self._blue_team_scanned
 
         # ── Items + CDR (SEBELUM skills, biar _cdr up-to-date) ──
         self._cdr = 0.0
@@ -614,7 +666,7 @@ def draw_status_overlay(frame: np.ndarray, status: dict[str, Any]):
     # ── Build status lines ──
     lines: list[tuple[str, tuple[int, int, int]]] = []
 
-    lines.append(("═══ HERO PANEL ═══", (200, 200, 255)))
+    lines.append(("----- HERO PANEL -----", (200, 200, 255)))
 
     if status.get("hero_name"):
         lines.append((f"Hero:  {status['hero_name']}", (255, 255, 255)))
@@ -637,7 +689,7 @@ def draw_status_overlay(frame: np.ndarray, status: dict[str, Any]):
     # Skills
     skills = status.get("skills", {})
     if skills:
-        lines.append(("── Skills ──", (100, 200, 255)))
+        lines.append(("____ Skills ____", (100, 200, 255)))
         for name in ("passive", "skill_1", "skill_2", "skill_3", "battle_spell"):
             if name in skills:
                 s = skills[name]
@@ -665,9 +717,28 @@ def draw_status_overlay(frame: np.ndarray, status: dict[str, Any]):
     # Items
     item_list = status.get("items", [])
     if item_list:
-        lines.append(("── Items ──", (100, 255, 200)))
+        lines.append(("____ Items ____", (100, 255, 200)))
         for name in item_list:
             lines.append((f"  {name}", (200, 255, 200)))
+
+    # ── Blue Team (Scoreboard) ──
+    blue_heroes = status.get("blue_team_heroes", [])
+    blue_complete = status.get("blue_team_complete", False)
+    if blue_heroes:
+        lines.append(("____ TIM BIRU (ALLY) ____", (100, 200, 255)))
+        for h in sorted(blue_heroes, key=lambda x: x["slot"]):
+            hp_text = ""
+            hp = h.get("hp_pct")
+            if hp is not None:
+                hp_text = f" HP:{hp:.0%}"
+                hp_color = (0, 255, 0) if hp > 0.5 else (0, 200, 255) if hp > 0.2 else (0, 0, 255)
+            else:
+                hp_color = (180, 180, 180)
+            conf_color = (100, 255, 100) if h["confidence"] > 0.6 else (0, 255, 255)
+            lines.append((f"  [{h['slot']}] {h['name']}{hp_text}", conf_color if not hp_text else hp_color))
+    elif not blue_complete:
+        lines.append(("____ TIM BIRU (ALLY) ____", (100, 200, 255)))
+        lines.append((f"  Scanning... ({len(blue_heroes)}/5)", (180, 180, 180)))
 
     # ── Draw background panel (kanan) ──
     panel_w = 320
@@ -695,7 +766,7 @@ def draw_status_overlay(frame: np.ndarray, status: dict[str, Any]):
 
 # ── Help Overlay ───────────────────────────────────────────────────────
 _HELP_LINES = [
-    ("── Controls ──", (200, 200, 255)),
+    ("____ Controls ____", (200, 200, 255)),
     ("Space", "Pause / resume"),
     ("E", "Toggle layout editor"),
     ("S / Shift+S", "Save layout / Screenshot"),
@@ -994,6 +1065,11 @@ def main():
     vision_thread = threading.Thread(target=_vision_worker, daemon=True)
     vision_thread.start()
 
+    # ── Team HP Tracker (thread terpisah untuk HP bar hero) ──
+    hp_reader = FrameReader(vp)
+    hp_tracker = create_team_hp_tracker(hp_reader)
+    hp_tracker.start()
+
     # ── Overlay Thread ──
     overlay_queue: queue.Queue = queue.Queue(maxsize=2)
     display_frame: Any = None
@@ -1046,6 +1122,19 @@ def main():
         # Baca status terbaru dari vision thread
         with vision_status_lock:
             current_status = dict(vision_status) if vision_status else {}
+
+        # ── Sync HP tracker ke frame saat ini, lalu merge data ──
+        hp_tracker.sync_frame(frame_count)
+        hp_data = hp_tracker.get_all_hp()
+        if hp_data and current_status.get("blue_team_heroes"):
+            hp_map = {h["slot"]: h["hp_pct"] for h in hp_data}
+            for hero in current_status["blue_team_heroes"]:
+                slot = hero.get("slot")
+                if slot is not None and slot in hp_map:
+                    hp_val = hp_map[slot]
+                    # Hanya overwrite kalau HP tracker punya data valid
+                    if hp_val is not None:
+                        hero["hp_pct"] = hp_val
 
         # ── Drawing (submit ke overlay thread) ──
         if paused and clean_frame is not None:
@@ -1136,6 +1225,11 @@ def main():
                 print(f"  {path}: {'✅' if img is not None and img.size > 0 else '❌'} "
                       f"size={img.shape if img is not None else 'N/A'}")
 
+    # Cleanup
+    overlay_running = False
+    vision_running = False
+    hp_tracker.stop()
+    hp_reader.release()
     cap.release()
     cv2.destroyAllWindows()
 

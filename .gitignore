@@ -41,3 +41,4 @@ assets/databases/*.json
 *.log
 
 .claude
+.tmp

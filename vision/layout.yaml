@@ -5,7 +5,7 @@ hero_panel:
   type: composite
   portrait:
     description: Icon wajah hero terpilih
-    bbox: [720, 790, 82, 75]
+    bbox: [721, 793, 78, 69]
     type: template
     templates: heroes
   level:
@@ -65,3 +65,91 @@ detectors:
   level:
     method: ocr
     preprocess: [invert_if_dark]
+  blue_team:
+    description: Baris hero tim biru
+    bbox: [239, 948, 953, 91]
+    type: composite
+    portrait_hero_1:
+      bbox: [253, 963, 67, 67]
+      type: template
+      templates: heroes
+    hp_bar_hero_1:
+      bbox: [325, 1014, 100, 16]
+      type: bar
+      color: green
+    portrait_hero_2:
+      bbox: [442, 961, 70, 69]
+      type: template
+      templates: heroes
+    hp_bar_hero_2:
+      bbox: [518, 1017, 91, 12]
+      type: bar
+      color: green
+    portrait_hero_3:
+      bbox: [629, 964, 71, 69]
+      type: template
+      templates: heroes
+    hp_bar_hero_3:
+      bbox: [708, 1017, 92, 12]
+      type: bar
+      color: green
+    portrait_hero_4:
+      bbox: [816, 962, 75, 70]
+      type: template
+      templates: heroes
+    hp_bar_hero_4:
+      bbox: [895, 1015, 95, 14]
+      type: bar
+      color: green
+    portrait_hero_5:
+      bbox: [1008, 964, 69, 63]
+      type: template
+      templates: heroes
+    hp_bar_hero_5:
+      bbox: [1084, 1016, 91, 13]
+      type: bar
+      color: green
+  red_team:
+    description: Baris hero tim merah
+    bbox: [1162, 507, 953, 91]
+    type: composite
+    portrait_hero_1:
+      bbox: [1323, 962, 67, 67]
+      type: template
+      templates: heroes
+    hp_bar_hero_1:
+      bbox: [1218, 1016, 97, 12]
+      type: bar
+      color: green
+    portrait_hero_2:
+      bbox: [1514, 959, 70, 69]
+      type: template
+      templates: heroes
+    hp_bar_hero_2:
+      bbox: [1414, 1017, 91, 12]
+      type: bar
+      color: green
+    portrait_hero_3:
+      bbox: [1700, 961, 71, 69]
+      type: template
+      templates: heroes
+    hp_bar_hero_3:
+      bbox: [1602, 1016, 92, 12]
+      type: bar
+      color: green
+    portrait_hero_4:
+      bbox: [1889, 959, 75, 70]
+      type: template
+      templates: heroes
+    hp_bar_hero_4:
+      bbox: [1786, 1017, 93, 9]
+      type: bar
+      color: green
+    portrait_hero_5:
+      bbox: [2080, 962, 69, 63]
+      type: template
+      templates: heroes
+    hp_bar_hero_5:
+      bbox: [1978, 1016, 91, 13]
+      type: bar
+      color: green
