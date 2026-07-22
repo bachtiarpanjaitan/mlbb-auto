@@ -86,15 +86,15 @@ def draw_minimap_detections(frame, minimap_img, detections, mm_bbox):
         x2 = int(cx + r)
         y2 = int(cy + r)
 
-        # Box + center
-        cv2.rectangle(vis, (x1, y1), (x2, y2), color, 2)
-        cv2.circle(vis, (cx, cy), 2, color, -1)
+        # Box + center (thinner lines & smaller dot)
+        cv2.rectangle(vis, (x1, y1), (x2, y2), color, 1)
+        cv2.circle(vis, (cx, cy), 1, color, -1)
 
-        # Label
+        # Label (compact font)
         label = f"{'B' if team=='blue' else 'R'} {conf:.2f}"
-        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.4, 1)
-        cv2.rectangle(vis, (x1, y1 - th - 4), (x1 + tw + 4, y1), BLACK, -1)
-        cv2.putText(vis, label, (x1 + 2, y1 - 3), cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
+        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.3, 1)
+        cv2.rectangle(vis, (x1, y1 - th - 2), (x1 + tw + 2, y1), BLACK, -1)
+        cv2.putText(vis, label, (x1 + 1, y1 - 2), cv2.FONT_HERSHEY_SIMPLEX, 0.3, color, 1)
 
     frame[mm_y:mm_y+mm_h, mm_x:mm_x+mm_w] = vis
 

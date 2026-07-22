@@ -582,10 +582,9 @@ class MinimapHeroTracker:
         """Detect via YOLO (async cache) or HSV (fallback)."""
         if minimap_img is None or minimap_img.size == 0:
             return []
-        # YOLO: pakai hasil async + trigger inference berikutnya
+        # YOLO: deteksi langsung pada frame saat ini agar koordinat presisi dan tidak lag
         if self._yolo_detector is not None:
-            dets = self._yolo_detector.last_result
-            self._yolo_detector.detect_async(minimap_img)
+            dets = self._yolo_detector.detect(minimap_img)
             result = [(team, cx, cy, r) for team, cx, cy, r, _ in dets]
             result.sort(key=lambda x: -x[3])
             final, used = [], []
@@ -1193,7 +1192,7 @@ class MinimapHeroTracker:
                     h.frames_alive += 1; h.miss_count = 0
                     h.confidence = min(1.0, h.frames_alive * 0.04 + 0.5)
 
-        # ── 5. Sisa dots: assign ke roster unassigned atau unknown ──
+        # ── 5. Sisa dots: assign ke unknown (JANGAN tebak acak nama hero dari roster) ──
         for team, cx, cy, r in all_dots:
             if any(i in used_dots for i, (t, cxc, cyc, rc) in enumerate(all_dots) if (cxc, cyc) == (cx, cy)):
                 continue
@@ -1201,13 +1200,10 @@ class MinimapHeroTracker:
                                      and abs(cy - int(mh.norm_y*self._mm_h)) < NMS_DISTANCE_THRESHOLD
                                      for mn in matched_names for mh in [self._tracked.get(mn)] if mh):
                 continue
-            candidates = [n for n in self._roster_unassigned if self._roster.get(n) == team]
-            if candidates:
-                name = candidates[0]
-                self._roster_unassigned.discard(name)
-            else:
-                self._unknown_counter = getattr(self, "_unknown_counter", 0) + 1
-                name = f"unknown_{team}_{self._unknown_counter}"
+            
+            # Jika template matching tidak cocok, buat sebagai unknown (bukan asal tebak roster)
+            self._unknown_counter = getattr(self, "_unknown_counter", 0) + 1
+            name = f"unknown_{team}_{self._unknown_counter}"
             
             nx, ny = self._normalize(cx, cy)
             h = TrackedMinimapHero(name=name, team=team, norm_x=nx, norm_y=ny,

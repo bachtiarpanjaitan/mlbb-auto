@@ -877,11 +877,11 @@ def draw_minimap_heroes(frame: np.ndarray, status: dict[str, Any],
     if not heroes:
         return
 
-    fs = 0.65
-    thick_circle = 3
-    thick_text = 2
-    dot_r = 16
-    glow_r = 26
+    fs = 0.4
+    thick_circle = 1
+    thick_text = 1
+    dot_r = 7
+    glow_r = 12
 
     for entry in heroes:
         px = mm_x + entry.get("pixel_x", 0)
@@ -894,6 +894,9 @@ def draw_minimap_heroes(frame: np.ndarray, status: dict[str, Any],
             continue
         if px < mm_x or px > mm_x + mm_w or py < mm_y or py > mm_y + mm_h:
             continue
+        # Skip drawing dot & label if hero identity is unknown / unassigned
+        if not name or name == "?" or str(name).lower().startswith("unknown"):
+            continue
 
         if team == "blue":
             outer_color = (255, 140, 60)
@@ -902,25 +905,25 @@ def draw_minimap_heroes(frame: np.ndarray, status: dict[str, Any],
             outer_color = (60, 60, 255)
             fill_color = (30, 30, 200)
 
-        # Dot + glow
+        # Dot + glow (smaller & cleaner)
         cv2.circle(frame, (px, py), glow_r, outer_color, thick_circle)
         cv2.circle(frame, (px, py), dot_r, fill_color, -1)
-        cv2.circle(frame, (px, py), dot_r // 2, (255, 255, 255), -1)
+        cv2.circle(frame, (px, py), max(2, dot_r // 2), (255, 255, 255), -1)
 
-        # Label
+        # Label (compact font & small padding)
         label = name[:10]
         extra = f" ({conf:.0%})" if conf < 0.8 else ""
         text = f"{label}{extra}"
 
         (tw, th), bl = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, fs, thick_text)
-        lx = px + dot_r + 8
+        lx = px + dot_r + 4
         ly = py + th // 3
-        pad = 8
+        pad = 3
 
         cv2.rectangle(frame, (lx - pad, ly - th - pad), (lx + tw + pad, ly + pad),
                       (0, 0, 0), -1)
         cv2.rectangle(frame, (lx - pad, ly - th - pad), (lx + tw + pad, ly + pad),
-                      outer_color, thick_circle // 2 + 1)
+                      outer_color, 1)
         cv2.putText(frame, text, (lx, ly), cv2.FONT_HERSHEY_SIMPLEX,
                     fs, (255, 255, 255), thick_text, cv2.LINE_AA)
 
@@ -970,9 +973,9 @@ def draw_minimap_hero_overlay(frame: np.ndarray, status: dict[str, Any]):
         lines.append(("  (waiting for detection)", (180, 180, 180)))
 
     # ── Draw panel ──
-    panel_w = 380
-    line_h = 28
-    pad = 12
+    panel_w = 300
+    line_h = 20
+    pad = 8
     total_h = len(lines) * line_h + pad * 2
 
     panel_x = 10
@@ -985,8 +988,8 @@ def draw_minimap_hero_overlay(frame: np.ndarray, status: dict[str, Any]):
 
     y_pos = panel_y + pad + line_h - 5
     for text, color in lines:
-        cv2.putText(frame, text, (panel_x + 12, y_pos),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2, cv2.LINE_AA)
+        cv2.putText(frame, text, (panel_x + 8, y_pos),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1, cv2.LINE_AA)
         y_pos += line_h
 
 
