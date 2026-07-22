@@ -88,6 +88,17 @@ class DetectorManager:
         except Exception as e:
             log.warning("Failed to load items.json: %s", e)
 
+        # ── Load spell database (cooldown data) ──
+        self._spell_db: dict[str, dict] = {}
+        spell_db_path = os.path.join(base, "assets", "databases", "spells.json")
+        try:
+            with open(spell_db_path) as f:
+                for spell in json.load(f):
+                    self._spell_db[spell["key"]] = spell
+            log.info("Loaded %d spells from database", len(self._spell_db))
+        except Exception as e:
+            log.warning("Failed to load spells.json: %s", e)
+
         # ── Load item templates (resize sesuai ukuran item slot di layout) ──
         self._item_matcher = None
         item_templates: dict[str, np.ndarray] = {}
@@ -141,9 +152,16 @@ class DetectorManager:
         self.blue_team_detector = BlueTeamDetector(confidence_threshold=0.25)
         self.red_team_detector = RedTeamDetector(confidence_threshold=0.25)
 
-        # ── Cached identified battle spell ──
+        # ── Cached identified battle spell (periodic retry, bukan one-shot) ──
         self._cached_spell_key: str | None = None
         self._cached_spell_cd: float | None = None
+        self._last_spell_identify_time: float = -999.0
+        self._spell_identify_interval: float = 5.0  # retry identifikasi setiap 5 detik
+
+        # ── Battle spell reference comparison ──
+        self._spell_ref_image: np.ndarray | None = None
+        self._spell_ref_captured: bool = False
+        self._spell_cd_end: float = 0.0  # timer spell (independent dari _cd_timers)
 
         # ── Cooldown tracker ──
         self._cd_timers: dict[str, float] = {}  # skill_name -> end_timestamp
@@ -397,21 +415,69 @@ class DetectorManager:
                 # Update cooldown: visual check (deteksi gelap) + timer kalkulasi
                 self._update_skill_cooldown(skill_name, skill_img, skill_info, video_time)
 
-                # ── Battle spell identification (template matching) ──
+                # ── Battle spell identification (periodic retry, bukan one-shot) ──
                 if skill_name == "battle_spell" and self._spell_matcher is not None:
-                    if self._cached_spell_key is None:
+                    should_identify = (
+                        self._cached_spell_key is None or
+                        video_time - self._last_spell_identify_time >= self._spell_identify_interval
+                    )
+                    if should_identify:
                         gray = cv2.cvtColor(skill_img, cv2.COLOR_BGR2GRAY)
                         if gray.mean() > 30:  # skip if completely dark
                             match = self._spell_matcher.match(skill_img)
                             if match and match.success and match.label:
-                                self._cached_spell_key = match.label
-                                cd = self._BATTLE_SPELL_CDS.get(match.label)
+                                target_label = match.label
+                                self._cached_spell_key = target_label
+                                # Cari CD dari spell database dulu, fallback ke hardcoded dict
+                                cd = None
+                                spell_entry = self._spell_db.get(target_label)
+                                if spell_entry and spell_entry.get("cooldown"):
+                                    cd = spell_entry["cooldown"]
+                                if cd is None:
+                                    cd = self._BATTLE_SPELL_CDS.get(target_label)
                                 if cd:
                                     self._cached_spell_cd = float(cd)
-                                log.info("Battle spell identified: %s (CD=%ss, conf=%.0f%%)",
-                                         match.label, cd or "?", match.confidence * 100)
+                                self._last_spell_identify_time = video_time
+                                log.info("Battle spell: %s (CD=%ss, conf=%.0f%%)",
+                                         target_label, cd or "?", match.confidence * 100)
                     if self._cached_spell_key:
                         skill_info["spell_name"] = self._cached_spell_key
+
+                # ═══ Battle spell: cooldown via reference comparison ═══
+                if skill_name == "battle_spell":
+                    # Capture reference di t~1s (spell pasti ready)
+                    if not self._spell_ref_captured and video_time >= 1.0:
+                        gray_check = cv2.cvtColor(skill_img, cv2.COLOR_BGR2GRAY)
+                        if gray_check.mean() > 80:
+                            self._spell_ref_image = skill_img.copy()
+                            self._spell_ref_captured = True
+                            log.info("📸 Spell reference captured at t=%.1fs", video_time)
+
+                    # Bandingkan tiap frame vs reference
+                    if self._spell_ref_captured and self._spell_ref_image is not None:
+                        ref_g = cv2.cvtColor(self._spell_ref_image, cv2.COLOR_BGR2GRAY)
+                        cur_g = cv2.cvtColor(skill_img, cv2.COLOR_BGR2GRAY)
+                        corr = float(cv2.matchTemplate(ref_g, cur_g, cv2.TM_CCOEFF_NORMED)[0][0])
+
+                        if corr < 0.80:
+                            # Berbeda → cooldown
+                            skill_info["ready"] = False
+                            skill_info["cooldown"] = True
+
+                            # Timer independent (gak kepengaruh _update_skill_cooldown)
+                            if self._spell_cd_end <= video_time:
+                                cd_sec = self._cached_spell_cd or 90.0
+                                self._spell_cd_end = video_time + cd_sec
+
+                            remaining = max(0.0, self._spell_cd_end - video_time)
+                            if remaining > 0:
+                                skill_info["remaining_cd"] = round(remaining, 1)
+                        else:
+                            # Sama → ready
+                            skill_info["ready"] = True
+                            skill_info["cooldown"] = False
+                            skill_info.pop("remaining_cd", None)
+                            self._spell_cd_end = 0.0
 
                 skills_status[skill_name] = skill_info
         if skills_status:
@@ -468,8 +534,13 @@ class DetectorManager:
         if skill_name == "battle_spell":
             if self._cached_spell_cd is not None:
                 return self._cached_spell_cd
-            if self._cached_spell_key and self._cached_spell_key in self._BATTLE_SPELL_CDS:
-                return self._BATTLE_SPELL_CDS[self._cached_spell_key]
+            # Cek dari spells.json dulu
+            if self._cached_spell_key:
+                entry = self._spell_db.get(self._cached_spell_key)
+                if entry and entry.get("cooldown"):
+                    return float(entry["cooldown"])
+                if self._cached_spell_key in self._BATTLE_SPELL_CDS:
+                    return self._BATTLE_SPELL_CDS[self._cached_spell_key]
             return 90.0  # fallback default
 
         if skill_name in self._BATTLE_SPELL_CDS:
@@ -1253,6 +1324,10 @@ def main():
                 detector_mgr._cd_ref_brightness.clear()
             detector_mgr._cached_spell_key = None
             detector_mgr._cached_spell_cd = None
+            detector_mgr._last_spell_identify_time = -999.0
+            detector_mgr._spell_ref_image = None
+            detector_mgr._spell_ref_captured = False
+            detector_mgr._spell_cd_end = 0.0
             detector_mgr._cached_hero_name = None
             # Reset team scanners
             detector_mgr._blue_team_scanned = False

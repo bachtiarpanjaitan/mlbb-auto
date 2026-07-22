@@ -215,12 +215,20 @@ def main():
                 if not label or label in ["Level Scaling", "", "Calculation"]:
                     continue
 
-                # Skip cooldown and unlocked at level (per user request)
-                if label.lower().startswith("cooldown") or label.lower().startswith("unlocked"):
+                # Skip unlocked at level only
+                if label.lower().startswith("unlocked"):
                     continue
 
                 # Get value segments (handles <br/> split for multi-line values)
                 value_segments = extract_cell_value(cells[1])
+
+                # ── Cooldown: capture sebagai scalar (nilai tunggal, bukan level-scaling) ──
+                if "cooldown" in label.lower():
+                    for segment in value_segments:
+                        nums = re.findall(r'\d+\.?\d*', segment)
+                        if nums:
+                            spell_buffer["cooldown"] = float(nums[0])
+                    continue
 
                 attr_key = label.lower().replace(" ", "_").replace("-", "_").replace("%", "pct")
 
@@ -289,6 +297,8 @@ def _save_spell(spells, buffer):
         entry["description"] = buffer["description"]
     if buffer.get("image_file"):
         entry["image_file"] = buffer["image_file"]
+    if buffer.get("cooldown"):
+        entry["cooldown"] = int(buffer["cooldown"])
     if buffer.get("scaling"):
         entry["level_scaling"] = buffer["scaling"]
 
