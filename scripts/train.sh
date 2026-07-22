@@ -13,11 +13,25 @@ echo "Dataset: trainings/hero_detector/"
 echo "  Images: $(ls trainings/hero_detector/images/train/*.png 2>/dev/null | wc -l) train"
 echo "  Labels: $(find trainings/hero_detector/labels/train -name '*.txt' -not -empty | wc -l) non-empty"
 echo "  Classes:"
-cat trainings/hero_detector/labels/train/*.txt 2>/dev/null | grep -v '^$' | awk '{print $1}' | sort | uniq -c | sort -rn | while read count cls; do
-    name="blue_hero"
-    [ "$cls" = "1" ] && name="red_hero"
-    echo "           $count $name"
-done
+python3 -c "
+import yaml
+from pathlib import Path
+from collections import Counter
+
+data_cfg = yaml.safe_load(Path('trainings/hero_detector/data.yaml').read_text())
+names = data_cfg.get('names', [])
+
+counts = Counter()
+for f in Path('trainings/hero_detector/labels/train').glob('*.txt'):
+    for line in f.read_text().splitlines():
+        if line.strip():
+            counts[int(line.split()[0])] += 1
+
+for cls_id, count in counts.most_common():
+    cname = names[cls_id] if cls_id < len(names) else f'cls_{cls_id}'
+    print(f'           {count:5d} {cname}')
+"
+
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
