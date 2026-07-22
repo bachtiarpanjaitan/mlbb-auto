@@ -1507,6 +1507,44 @@ def main():
     overlay_thread = threading.Thread(target=_overlay_worker, daemon=True)
     overlay_thread.start()
 
+    # ── Minimap Hero Tracker Thread (thread terpisah untuk tracking hero) ──
+    minimap_queue: queue.Queue = queue.Queue(maxsize=2)
+    minimap_result: dict = {}
+    minimap_result_lock = threading.Lock()
+    minimap_running = True
+
+    def _minimap_worker():
+        nonlocal minimap_result
+        while minimap_running:
+            try:
+                mm_img, fc = minimap_queue.get(timeout=0.2)
+            except queue.Empty:
+                continue
+            try:
+                mm_heroes = detector_mgr.minimap_hero_tracker.update(mm_img, fc)
+                heroes_data = [
+                    {"name": h.name, "team": h.team,
+                     "norm_x": round(h.norm_x, 3), "norm_y": round(h.norm_y, 3),
+                     "pixel_x": h.pixel_x, "pixel_y": h.pixel_y,
+                     "confidence": round(h.confidence, 3),
+                     "game_x": round(h.game_pos.x, 1) if h.game_pos else None,
+                     "game_y": round(h.game_pos.y, 1) if h.game_pos else None,
+                     "lane": h.game_pos.lane if h.game_pos else None,
+                     "nearest": h.game_pos.nearest_landmark if h.game_pos else None}
+                    for h in mm_heroes
+                ]
+                debug_data = detector_mgr.minimap_hero_tracker.get_last_debug_data()
+                with minimap_result_lock:
+                    minimap_result = {
+                        "heroes": heroes_data,
+                        "debug": debug_data,
+                    }
+            except Exception as e:
+                log.warning("Minimap tracker error: %s", e)
+
+    minimap_thread = threading.Thread(target=_minimap_worker, daemon=True)
+    minimap_thread.start()
+
     while True:
         if not paused:
             r, fr = cap.read()
@@ -1530,28 +1568,26 @@ def main():
         with vision_status_lock:
             current_status = dict(vision_status) if vision_status else {}
 
-        # ── Minimap tracking tiap frame (YOLO async jadi cepet) ──
+        # ── Minimap tracking (submit ke minimap thread) ──
         if not paused:
             mm_img = crop_region(fr, "map")
             if mm_img is not None and mm_img.size > 0:
-                mm_heroes = detector_mgr.minimap_hero_tracker.update(mm_img, frame_count)
-                current_status["minimap_heroes"] = [
-                    {"name": h.name, "team": h.team,
-                     "norm_x": round(h.norm_x, 3), "norm_y": round(h.norm_y, 3),
-                     "pixel_x": h.pixel_x, "pixel_y": h.pixel_y,
-                     "confidence": round(h.confidence, 3),
-                     "game_x": round(h.game_pos.x, 1) if h.game_pos else None,
-                     "game_y": round(h.game_pos.y, 1) if h.game_pos else None,
-                     "lane": h.game_pos.lane if h.game_pos else None,
-                     "nearest": h.game_pos.nearest_landmark if h.game_pos else None}
-                    for h in mm_heroes
-                ]
-                current_status["minimap_tracking_active"] = True
-                dd = detector_mgr.minimap_hero_tracker.get_last_debug_data()
-                if dd:
-                    current_status["_mm_debug"] = {"blue_mask": dd.get("blue_mask"),
-                        "red_mask": dd.get("red_mask"), "blue_dots": dd.get("blue_dots", []),
-                        "red_dots": dd.get("red_dots", [])}
+                try:
+                    minimap_queue.put_nowait((mm_img.copy(), frame_count))
+                except queue.Full:
+                    pass
+
+        # Baca hasil terbaru dari minimap thread
+        with minimap_result_lock:
+            mm_data = dict(minimap_result) if minimap_result else {}
+        if mm_data:
+            current_status["minimap_heroes"] = mm_data.get("heroes", [])
+            current_status["minimap_tracking_active"] = True
+            dd = mm_data.get("debug")
+            if dd:
+                current_status["_mm_debug"] = {"blue_mask": dd.get("blue_mask"),
+                    "red_mask": dd.get("red_mask"), "blue_dots": dd.get("blue_dots", []),
+                    "red_dots": dd.get("red_dots", [])}
 
         # ── Sync HP tracker → merge HP untuk blue + red ──
         hp_tracker.sync_frame(frame_count)
@@ -1679,6 +1715,7 @@ def main():
     # Cleanup
     overlay_running = False
     vision_running = False
+    minimap_running = False
     hp_tracker.stop()
     hp_reader.release()
     cap.release()
