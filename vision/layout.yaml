@@ -1,7 +1,7 @@
 video: {name: Mobile Legends Replay, width: 2400, height: 1080, fps: 30, aspect_ratio: '20:9'}
 hero_panel:
   description: Panel info hero terpilih — portrait, text, HP bar, skill, item
-  bbox: [604, 764, 1121, 173]
+  bbox: [601, 766, 1121, 173]
   type: composite
   portrait:
     description: Icon wajah hero terpilih
@@ -20,7 +20,7 @@ hero_panel:
     color: green
   skills:
     description: Skill hero — 5 slot berjajar
-    bbox: [849, 565, 437, 80]
+    bbox: [835, 831, 445, 93]
     type: composite
     skill_1:
       bbox: [845, 837, 70, 70]

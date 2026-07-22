@@ -99,25 +99,35 @@ class TeamHPTracker:
     def _run_loop(self):
         frame_idx = 0
         while self._running:
-            with self._lock:
-                if self._target_frame is not None:
-                    frame_idx = self._target_frame
-                    self._target_frame = None
+            try:
+                with self._lock:
+                    if self._target_frame is not None:
+                        frame_idx = self._target_frame
+                        self._target_frame = None
 
-            frame = self.reader.read(frame_idx)
-            if frame is None:
-                frame_idx = 0
+                # Skip jika frame_idx di luar range
+                if frame_idx >= self.reader.total_frames:
+                    frame_idx = 0
+                    time.sleep(self.interval_sec)
+                    continue
+
+                frame = self.reader.read(frame_idx)
+                if frame is None:
+                    frame_idx = 0
+                    time.sleep(self.interval_sec)
+                    continue
+
+                video_time = frame_idx / self.reader.fps
+                self._extract_all_hp(frame, frame_idx, video_time)
+
+                frame_idx += 1
+                if frame_idx >= self.reader.total_frames:
+                    frame_idx = 0
+
                 time.sleep(self.interval_sec)
-                continue
-
-            video_time = frame_idx / self.reader.fps
-            self._extract_all_hp(frame, frame_idx, video_time)
-
-            frame_idx += 1
-            if frame_idx >= self.reader.total_frames:
-                frame_idx = 0
-
-            time.sleep(self.interval_sec)
+            except Exception as e:
+                logger.warning("TeamHP thread error (frame=%d): %s", frame_idx, e)
+                time.sleep(self.interval_sec)
 
         self._running = False
 

@@ -1134,7 +1134,6 @@ def _save_layout(editor: _LayoutEditor):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("video", nargs="?")
-    ap.add_argument("--resize", type=float, default=0.7)
     ap.add_argument("--overlay", action="store_true", default=True,
                     help="Tampilkan status overlay (default: True)")
     ap.add_argument("--no-overlay", action="store_false", dest="overlay")
@@ -1158,8 +1157,20 @@ def main():
     fps = cap.get(cv2.CAP_PROP_FPS) or 30
     frame_delay = max(1, int(1000 / fps / a.speed))
     print(f"Video: {fps:.1f} fps — {a.speed:.1f}× speed ({frame_delay}ms delay)")
-    dw = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) * a.resize)
-    dh = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) * a.resize)
+
+    # Window size: lebar full screen, height mengikut ratio video
+    import tkinter as _tk
+    _root = _tk.Tk()
+    _root.withdraw()
+    screen_w = _root.winfo_screenwidth()
+    screen_h = _root.winfo_screenheight()
+    _root.destroy()
+    video_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    video_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+    # Scale to full screen width, height mengikut ratio video
+    dw = screen_w
+    dh = int(screen_w * video_h / video_w)
 
     # Init detectors
     detector_mgr = DetectorManager()
@@ -1169,8 +1180,13 @@ def main():
     show_grid = False
     show_help = False
 
+    # Window lebar penuh tanpa fullscreen (biar gak nutup terminal)
     cv2.namedWindow("MLBB Debug", cv2.WINDOW_NORMAL)
+    # Show dummy frame dulu — di macOS, resize cuma jalan setelah imshow
+    cv2.imshow("MLBB Debug", np.zeros((1, 1, 3), dtype=np.uint8))
+    cv2.waitKey(1)
     cv2.resizeWindow("MLBB Debug", dw, dh)
+    cv2.moveWindow("MLBB Debug", 0, 0)
 
     # ── Layout Editor ──
     layout_editor = _LayoutEditor()
@@ -1248,6 +1264,7 @@ def main():
             r, fr = cap.read()
             if not r:
                 cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                frame_count = 0
                 continue
 
         # ── Detection (submit ke vision thread) ──
@@ -1292,9 +1309,10 @@ def main():
         with display_lock:
             render = display_frame
         if render is not None:
-            vis = cv2.resize(render, (dw, dh)) if a.resize < 1 else render
+            # Video full width, height mengikut aspect ratio
+            vis = cv2.resize(render, (dw, dh))
         else:
-            vis = draw_src
+            vis = cv2.resize(draw_src, (dw, dh))
         cv2.imshow("MLBB Debug", vis)
 
         # ── Controls ──
