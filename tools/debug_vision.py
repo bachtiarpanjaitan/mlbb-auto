@@ -85,9 +85,14 @@ class DetectorManager:
         except Exception as e:
             log.warning("Failed to load items.json: %s", e)
 
-        # ── Load item templates (resize ke 59x59 = ukuran item slot) ──
+        # ── Load item templates (resize sesuai ukuran item slot di layout) ──
         self._item_matcher = None
         item_templates: dict[str, np.ndarray] = {}
+        item_region = layout.get_region("hero_panel", "items", "item_1")
+        if item_region and "bbox" in item_region:
+            iw, ih = item_region["bbox"][2], item_region["bbox"][3]
+        else:
+            iw, ih = 59, 59  # fallback
         items_path = os.path.join(base, "assets", "items")
         try:
             for fname in sorted(os.listdir(items_path)):
@@ -95,17 +100,22 @@ class DetectorManager:
                     stem = fname[:-4]
                     img = cv2.imread(os.path.join(items_path, fname))
                     if img is not None:
-                        img = cv2.resize(img, (59, 59), interpolation=cv2.INTER_AREA)
+                        img = cv2.resize(img, (iw, ih), interpolation=cv2.INTER_AREA)
                         item_templates[stem] = img
-            log.info("Loaded %d item templates (59x59)", len(item_templates))
+            log.info("Loaded %d item templates (%dx%d)", len(item_templates), iw, ih)
         except Exception as e:
             log.warning("Failed to load item templates: %s", e)
         if item_templates:
             self._item_matcher = TemplateMatcher(threshold=0.25, templates=item_templates)
 
-        # ── Load battle spell templates (resize ke 59x59 = ukuran battle_spell slot) ──
+        # ── Load battle spell templates (resize sesuai ukuran battle_spell di layout) ──
         self._spell_matcher = None
         spell_templates: dict[str, np.ndarray] = {}
+        spell_region = layout.get_region("hero_panel", "skills", "battle_spell")
+        if spell_region and "bbox" in spell_region:
+            sw, sh = spell_region["bbox"][2], spell_region["bbox"][3]
+        else:
+            sw, sh = 59, 59  # fallback
         spells_path = os.path.join(base, "assets", "spells")
         try:
             for fname in sorted(os.listdir(spells_path)):
@@ -116,7 +126,7 @@ class DetectorManager:
                         continue
                     img = cv2.imread(os.path.join(spells_path, fname))
                     if img is not None:
-                        img = cv2.resize(img, (59, 59), interpolation=cv2.INTER_AREA)
+                        img = cv2.resize(img, (sw, sh), interpolation=cv2.INTER_AREA)
                         spell_templates[stem] = img
             log.info("Loaded %d spell templates (59x59)", len(spell_templates))
         except Exception as e:
@@ -520,7 +530,9 @@ class DetectorManager:
                 # Base cooldown — hanya setelah skill pernah terlihat ready
                 cd_sec = self._get_base_cooldown(skill_name)
                 if cd_sec:
-                    actual_cd = cd_sec * (1 - self._cdr)
+                    # CDR hanya untuk hero skills, tidak untuk battle spell
+                    cdr_mult = 1.0 if skill_name == "battle_spell" else (1 - self._cdr)
+                    actual_cd = cd_sec * cdr_mult
                     self._cd_timers[skill_name] = vt + actual_cd
                     skill_info["remaining_cd"] = round(actual_cd, 1)
             return
