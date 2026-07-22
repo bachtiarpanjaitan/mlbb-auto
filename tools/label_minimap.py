@@ -99,53 +99,85 @@ def main():
             boxes = []
             frame_idx += 1
 
+            BOTTOM_BAR_H = 60
+
             # ── Draw overlay ──
-            def draw_overlay(vis, bx, idx, name, _label_mode):
+            def draw_overlay(vis_map, bx, idx, total_f, fps_val, name, _label_mode):
+                canvas = np.zeros((IMG_H * 2 + BOTTOM_BAR_H, IMG_W * 2, 3), dtype=np.uint8)
+                canvas[IMG_H * 2:, :] = (30, 30, 35)
+
                 for cls, cx, cy, w, h in bx:
                     center_x = int(cx * 2)
                     center_y = int(cy * 2)
                     radius = int((w / 2) * 2)  # radius dalam skala visual (2x)
-                    # BGR colors: Blue=(255,180,30), Red=(30,30,255)
                     if cls == 0:
                         box_color = (255, 180, 30)  # biru (B=255)
                         text = "BLUE"
                     else:
                         box_color = (30, 30, 255)   # merah (R=255)
                         text = "RED"
-                    # Draw circle overlay instead of rectangle
-                    cv2.circle(vis, (center_x, center_y), radius, box_color, 3)
-                    # Draw center point dot
-                    cv2.circle(vis, (center_x, center_y), 3, (255, 255, 255), -1)
-                    # Label bg
-                    cv2.rectangle(vis, (center_x - 25, center_y - radius - 20), (center_x + 25, center_y - radius), (0, 0, 0), -1)
-                    cv2.putText(vis, text, (center_x - 20, center_y - radius - 5),
+                    cv2.circle(vis_map, (center_x, center_y), radius, box_color, 3)
+                    cv2.circle(vis_map, (center_x, center_y), 3, (255, 255, 255), -1)
+                    cv2.rectangle(vis_map, (center_x - 25, center_y - radius - 20), (center_x + 25, center_y - radius), (0, 0, 0), -1)
+                    cv2.putText(vis_map, text, (center_x - 20, center_y - radius - 5),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.55, box_color, 3)
-                cv2.putText(vis, f"Frame {idx} - {name}  [{len(bx)} dots]",
+
+                canvas[:IMG_H * 2, :] = vis_map
+
+                # Top overlay info
+                cv2.putText(canvas, f"Frame {idx} - {name}  [{len(bx)} dots]",
                             (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                cv2.putText(canvas, "[N]ext (+1s) [S]ave+Next [U]ndo [Q]uit",
+                            (10, 55), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 1)
                 mode_text = "BLUE" if _label_mode[0] == 0 else "RED"
                 mode_color = (255, 180, 30) if _label_mode[0] == 0 else (30, 30, 255)
-                cv2.putText(vis, f"[B]lue [R]ed  Mode: {mode_text}", (10, 80),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.55, mode_color, 2)
-                cv2.putText(vis, "[N]ext [S]ave+Next [Q]uit",
-                            (10, 55), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 1)
-                return vis
+                cv2.putText(canvas, f"Left-Click/B/R: Mode: {mode_text} | Right-Click: RED", (10, 80),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, mode_color, 2)
+
+                # Separator line
+                cv2.line(canvas, (0, IMG_H * 2), (IMG_W * 2, IMG_H * 2), (80, 80, 80), 2)
+
+                # Timestamp calculation
+                curr_sec = (idx - 1) / fps_val if fps_val > 0 else 0
+                tot_sec = total_f / fps_val if fps_val > 0 else 0
+                cur_m, cur_s = int(curr_sec // 60), int(curr_sec % 60)
+                tot_m, tot_s = int(tot_sec // 60), int(tot_sec % 60)
+
+                timestamp_str = f"Timestamp: {cur_m:02d}:{cur_s:02d} / {tot_m:02d}:{tot_s:02d} ({curr_sec:.1f}s)"
+                frame_str = f"Frame: {idx} / {total_f}"
+
+                # Timestamp display below map
+                cv2.putText(canvas, timestamp_str, (15, IMG_H * 2 + 28),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 255, 255), 2)
+                cv2.putText(canvas, frame_str, (15, IMG_H * 2 + 50),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (180, 180, 180), 1)
+
+                return canvas
 
             _label_mode = [0]  # [0]=BLUE, [1]=RED
 
             def mouse_cb(event, x, y, flags, param):
                 nonlocal boxes
+                # Click must be inside minimap bounds
+                if y >= IMG_H * 2 or x >= IMG_W * 2:
+                    return
+
                 if event == cv2.EVENT_LBUTTONDOWN:
                     cls = _label_mode[0]
                     label = "BLUE" if cls == 0 else "RED"
                     boxes.append((cls, x / 2, y / 2, HERO_DOT_SIZE, HERO_DOT_SIZE))
                     print(f"    {label:4s} at ({x//2:3d}, {y//2:3d})")
+                elif event == cv2.EVENT_RBUTTONDOWN:
+                    cls = 1
+                    boxes.append((cls, x / 2, y / 2, HERO_DOT_SIZE, HERO_DOT_SIZE))
+                    print(f"    RED  at ({x//2:3d}, {y//2:3d})")
 
             cv2.namedWindow("Label Minimap Heroes", cv2.WINDOW_NORMAL)
-            cv2.resizeWindow("Label Minimap Heroes", IMG_W * 2, IMG_H * 2)
+            cv2.resizeWindow("Label Minimap Heroes", IMG_W * 2, IMG_H * 2 + BOTTOM_BAR_H)
             cv2.setMouseCallback("Label Minimap Heroes", mouse_cb)
 
             while True:
-                vis = draw_overlay(display.copy(), boxes, frame_idx, vid.name, _label_mode)
+                vis = draw_overlay(display.copy(), boxes, frame_idx, total_frames, fps, vid.name, _label_mode)
                 cv2.imshow("Label Minimap Heroes", vis)
                 k = cv2.waitKey(1) & 0xFF
 
@@ -155,6 +187,11 @@ def main():
                 elif k == ord('r'):
                     _label_mode[0] = 1
                     print("  Mode: RED")
+                elif k == ord('u'):
+                    if boxes:
+                        removed = boxes.pop()
+                        label = "BLUE" if removed[0] == 0 else "RED"
+                        print(f"  ↩️  Undo: removed {label} dot")
                 elif k == ord('n'):
                     if boxes:
                         cv2.imwrite(str(DATASET_DIR / "images" / "train" / img_name), mm)
