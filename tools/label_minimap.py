@@ -157,7 +157,7 @@ def main():
                     saved_count += 1
                     if boxes:
                         print(f"  Saved {img_name} ({len(boxes)} labels)")
-                    frame_idx += 150
+                    frame_idx += 30  # 1 detik (30fps)
                     cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
                     break
                 elif k == ord('s'):
