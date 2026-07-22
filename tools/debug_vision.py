@@ -484,25 +484,14 @@ class DetectorManager:
 
         timer_end = self._cd_timers.get(skill_name)
 
-        # ═══ TIMER AKTIF → override, tampilkan remaining CD ═══
-        if timer_end is not None and timer_end > vt:
-            skill_info["cooldown"] = True
-            skill_info["ready"] = False
-            skill_info["remaining_cd"] = round(timer_end - vt, 1)
-            return
-
-        # ═══ TIMER EXPIRED ═══
-        if timer_end is not None:
-            self._cd_timers.pop(skill_name, None)
-
         # ═══ Combined signal: SkillsDetector + template matching ═══
-        is_cd_detected = skill_info.get("cooldown", False) or (
+        is_cd_visual = skill_info.get("cooldown", False) or (
             skill_img is not None and self._check_cooldown_visual(skill_name, skill_img)
         )
-        is_ready_detected = skill_info.get("ready", False) and not is_cd_detected
+        is_ready_visual = skill_info.get("ready", False) and not is_cd_visual
 
         # ═══ Hysteresis (3-frame confirmation) ═══
-        if is_cd_detected:
+        if is_cd_visual:
             cc = self._cd_confirm_count.get(skill_name, 0) + 1
             self._cd_confirm_count[skill_name] = cc
             self._cd_ready_count.pop(skill_name, None)
@@ -514,30 +503,7 @@ class DetectorManager:
         cd_confirmed = self._cd_confirm_count.get(skill_name, 0) >= self._cd_confirm_threshold
         ready_confirmed = self._cd_ready_count.get(skill_name, 0) >= self._cd_confirm_threshold
 
-        # ═══ CD TERKONFIRMASI → set timer ═══
-        if cd_confirmed:
-            skill_info["cooldown"] = True
-            skill_info["ready"] = False
-            skill_info.pop("remaining_cd", None)
-
-            # OCR selalu akurat — pakai kapan aja
-            ocr_data = self._cd_ocr_results.pop(skill_name, None)
-            if ocr_data:
-                _, remaining = ocr_data
-                self._cd_timers[skill_name] = vt + remaining
-                skill_info["remaining_cd"] = round(remaining, 1)
-            elif skill_name in self._cd_seen_ready:
-                # Base cooldown — hanya setelah skill pernah terlihat ready
-                cd_sec = self._get_base_cooldown(skill_name)
-                if cd_sec:
-                    # CDR hanya untuk hero skills, tidak untuk battle spell
-                    cdr_mult = 1.0 if skill_name == "battle_spell" else (1 - self._cdr)
-                    actual_cd = cd_sec * cdr_mult
-                    self._cd_timers[skill_name] = vt + actual_cd
-                    skill_info["remaining_cd"] = round(actual_cd, 1)
-            return
-
-        # ═══ READY TERKONFIRMASI → clear timer ═══
+        # ═══ READY TERKONFIRMASI → clear timer, tampilkan ready ═══
         if ready_confirmed:
             self._cd_timers.pop(skill_name, None)
             self._cd_seen_ready.add(skill_name)
@@ -546,7 +512,35 @@ class DetectorManager:
             skill_info.pop("remaining_cd", None)
             return
 
-        # ═══ BELUM TERKONFIRMASI — trust combined signal, NO default ready ═══
+        # ═══ CD TERKONFIRMASI → set timer ═══
+        if cd_confirmed:
+            skill_info["cooldown"] = True
+            skill_info["ready"] = False
+            skill_info.pop("remaining_cd", None)
+
+            ocr_data = self._cd_ocr_results.pop(skill_name, None)
+            if ocr_data:
+                _, remaining = ocr_data
+                self._cd_timers[skill_name] = vt + remaining
+                skill_info["remaining_cd"] = round(remaining, 1)
+            elif skill_name in self._cd_seen_ready:
+                cd_sec = self._get_base_cooldown(skill_name)
+                if cd_sec:
+                    cdr_mult = 1.0 if skill_name == "battle_spell" else (1 - self._cdr)
+                    actual_cd = cd_sec * cdr_mult
+                    self._cd_timers[skill_name] = vt + actual_cd
+                    skill_info["remaining_cd"] = round(actual_cd, 1)
+            return
+
+        # ═══ BELUM TERKONFIRMASI → pakai timer sebagai estimasi ═══
+        if timer_end is not None and timer_end > vt:
+            skill_info["cooldown"] = True
+            skill_info["ready"] = False
+            skill_info["remaining_cd"] = round(timer_end - vt, 1)
+        elif timer_end is not None:
+            self._cd_timers.pop(skill_name, None)
+
+        # ═══ Trust combined signal, NO override ═══
         skill_info.pop("remaining_cd", None)
 
 

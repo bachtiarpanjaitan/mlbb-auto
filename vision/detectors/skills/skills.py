@@ -44,12 +44,12 @@ class SkillsDetector(BaseDetector):
 
         # ── HSV-based cooldown overlay detection ──
         hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
-        # Dark overlay = low V (0-80) + low S (cooldown overlay mostly neutral)
-        dark_overlay = cv2.inRange(hsv, np.array([0, 0, 0]), np.array([180, 80, 80]))
+        # Dark overlay = low Value (V < 80) — tanpa batas Saturation
+        dark_overlay = cv2.inRange(hsv, np.array([0, 0, 0]), np.array([180, 255, 80]))
         overlay_ratio = cv2.countNonZero(dark_overlay) / gray.size if gray.size > 0 else 0
 
-        # Bright pixels = highlight/available border
-        bright_mask = cv2.inRange(hsv, np.array([0, 0, 200]), np.array([180, 80, 255]))
+        # Bright pixels = highlight/available border (high Value, semua Saturation)
+        bright_mask = cv2.inRange(hsv, np.array([0, 0, 200]), np.array([180, 255, 255]))
         bright_pct = cv2.countNonZero(bright_mask) / gray.size if gray.size > 0 else 0
 
         # ── Edge analysis ──
