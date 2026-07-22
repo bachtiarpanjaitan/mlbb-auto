@@ -1,0 +1,256 @@
+#!/usr/bin/env python3
+"""
+MLBB Minimap Dataset Inspector
+Memeriksa gambar training & validation beserta label YOLO (.txt).
+
+Fitur:
+  - Navigasi tombol Panah Kiri (←) / Panah Kanan (→) atau A / D / N / P
+  - Menampilkan lingkaran/kotak bounding box label (Class 0: blue_hero, Class 1: red_hero)
+  - Zoom-in preview minimap dengan informasi detail piksel & label
+
+Penggunaan:
+  python tools/inspect_dataset.py
+  python tools/inspect_dataset.py --val   # Periksa dataset validation
+  python tools/inspect_dataset.py --all   # Periksa train + val
+"""
+
+import argparse
+import os
+import sys
+from pathlib import Path
+import cv2
+import numpy as np
+
+# Warna BGR
+BLUE = (255, 180, 30)
+RED = (30, 30, 255)
+GREEN = (50, 220, 50)
+WHITE = (255, 255, 255)
+BLACK = (20, 20, 20)
+GRAY = (120, 120, 120)
+
+CLASS_NAMES = {0: "blue_hero", 1: "red_hero"}
+CLASS_COLORS = {0: BLUE, 1: RED}
+
+
+def load_dataset_items(base_dir: Path, split: str = "train") -> list[tuple[Path, Path | None]]:
+    """Cari semua file gambar dan pasangannya file label .txt"""
+    img_dir = base_dir / "images" / split
+    lbl_dir = base_dir / "labels" / split
+
+    if not img_dir.exists():
+        return []
+
+    items = []
+    extensions = ("*.png", "*.jpg", "*.jpeg")
+    img_paths = []
+    for ext in extensions:
+        img_paths.extend(sorted(img_dir.glob(ext)))
+
+    for img_path in sorted(img_paths):
+        lbl_path = lbl_dir / f"{img_path.stem}.txt"
+        items.append((img_path, lbl_path if lbl_path.exists() else None))
+
+    return items
+
+
+def draw_labels_on_image(img: np.ndarray, lbl_path: Path | None) -> tuple[np.ndarray, list[dict]]:
+    """Gambarkan bounding box dan titik pusat label YOLO di gambar."""
+    vis = img.copy()
+    h, w = img.shape[:2]
+    labels_info = []
+
+    if lbl_path is None or not lbl_path.exists():
+        return vis, labels_info
+
+    try:
+        with open(lbl_path, "r") as f:
+            lines = f.readlines()
+
+        for idx, line in enumerate(lines):
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split()
+            if len(parts) < 5:
+                continue
+
+            cls_id = int(parts[0])
+            cx_norm, cy_norm = float(parts[1]), float(parts[2])
+            w_norm, h_norm = float(parts[3]), float(parts[4])
+
+            # Konversi koordinat ternormalisasi ke piksel
+            cx = int(cx_norm * w)
+            cy = int(cy_norm * h)
+            bw = int(w_norm * w)
+            bh = int(h_norm * h)
+
+            x1 = max(0, cx - bw // 2)
+            y1 = max(0, cy - bh // 2)
+            x2 = min(w - 1, cx + bw // 2)
+            y2 = min(h - 1, cy + bh // 2)
+
+            color = CLASS_COLORS.get(cls_id, GREEN)
+            cls_name = CLASS_NAMES.get(cls_id, f"cls_{cls_id}")
+
+            # Gambar Kotak + Lingkaran Tengah
+            r = max(bw, bh) // 2
+            cv2.rectangle(vis, (x1, y1), (x2, y2), color, 2)
+            cv2.circle(vis, (cx, cy), max(2, r), color, 2)
+            cv2.circle(vis, (cx, cy), 2, (255, 255, 255), -1)
+
+            # Label teks
+            text = f"#{idx+1} {cls_name}"
+            (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
+
+            ly = max(th + 4, y1)
+            cv2.rectangle(vis, (x1, ly - th - 4), (x1 + tw + 6, ly + 2), BLACK, -1)
+            cv2.rectangle(vis, (x1, ly - th - 4), (x1 + tw + 6, ly + 2), color, 1)
+            cv2.putText(vis, text, (x1 + 3, ly - 2), cv2.FONT_HERSHEY_SIMPLEX, 0.45, WHITE, 1, cv2.LINE_AA)
+
+            labels_info.append({
+                "id": idx + 1,
+                "class_id": cls_id,
+                "class_name": cls_name,
+                "cx": cx, "cy": cy, "w": bw, "h": bh
+            })
+
+    except Exception as e:
+        cv2.putText(vis, f"Error label: {e}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, RED, 1)
+
+    return vis, labels_info
+
+
+def main():
+    parser = argparse.ArgumentParser(description="MLBB Dataset Inspector")
+    parser.add_argument("--dir", default="trainings/hero_detector", help="Path folder dataset")
+    parser.add_argument("--val", action="store_true", help="Buka dataset validation")
+    parser.add_argument("--all", action="store_true", help="Buka dataset train & val gabungan")
+    args = parser.parse_args()
+
+    base_dir = Path(args.dir)
+    items = []
+
+    if args.all:
+        items.extend(load_dataset_items(base_dir, "train"))
+        items.extend(load_dataset_items(base_dir, "val"))
+    elif args.val:
+        items = load_dataset_items(base_dir, "val")
+    else:
+        items = load_dataset_items(base_dir, "train")
+
+    if not items:
+        print(f"❌ Tidak ada gambar ditemukan di {base_dir.absolute()}")
+        return
+
+    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    print(" 🔍 MLBB Dataset Inspector")
+    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    print(f" Total sampel: {len(items)} gambar")
+    print(" Kontrol:")
+    print("   [ -> ] / [ D ] / [ N ] : Gambar Selanjutnya")
+    print("   [ <- ] / [ A ] / [ P ] : Gambar Sebelumnya")
+    print("   [ Q ]  / [ ESC ]     : Keluar")
+    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+
+    current_idx = 0
+    window_name = "MLBB Minimap Dataset Inspector"
+    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+    cv2.resizeWindow(window_name, 700, 750)
+
+    while True:
+        img_path, lbl_path = items[current_idx]
+        img = cv2.imread(str(img_path))
+
+        if img is None:
+            canvas = np.zeros((400, 500, 3), dtype=np.uint8)
+            cv2.putText(canvas, f"Gagal membaca: {img_path.name}", (20, 200),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, RED, 1)
+        else:
+            vis_img, labels_info = draw_labels_on_image(img, lbl_path)
+            h, w = vis_img.shape[:2]
+
+            # Skalakan gambar minimap agar nyaman dilihat
+            display_scale = 1.6
+            dw, dh = int(w * display_scale), int(h * display_scale)
+            resized_vis = cv2.resize(vis_img, (dw, dh), interpolation=cv2.INTER_NEAREST)
+
+            # Buat Panel Informasi / Header
+            header_h = 130
+            canvas = np.zeros((dh + header_h, dw, 3), dtype=np.uint8)
+            canvas[:header_h, :] = (30, 30, 35)
+
+            # Judul & File Info
+            split_tag = "VAL" if "val" in str(img_path) else "TRAIN"
+            cv2.putText(canvas, f"[{split_tag}] Image ({current_idx + 1}/{len(items)}): {img_path.name}",
+                        (12, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.5, GREEN, 1, cv2.LINE_AA)
+
+            # Label status
+            blue_cnt = sum(1 for l in labels_info if l["class_id"] == 0)
+            red_cnt = sum(1 for l in labels_info if l["class_id"] == 1)
+
+            if lbl_path and lbl_path.exists():
+                lbl_status = f"Labels: {len(labels_info)}  (Blue: {blue_cnt}, Red: {red_cnt})"
+                lbl_color = (200, 255, 200)
+            else:
+                lbl_status = "⚠️ No Label File Found (.txt)"
+                lbl_color = RED
+
+            cv2.putText(canvas, lbl_status, (12, 48),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, lbl_color, 1, cv2.LINE_AA)
+
+            # Detail koordinat label
+            details_str = " | ".join([f"#{l['id']} {l['class_name'][:4]} ({l['cx']},{l['cy']})" for l in labels_info])
+            if not details_str:
+                details_str = "Tidak ada objek hero terlabeli (Empty)"
+            cv2.putText(canvas, details_str[:70], (12, 70),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, (180, 180, 180), 1, cv2.LINE_AA)
+
+            # Baris Bantuan Navigasi
+            cv2.rectangle(canvas, (0, 85), (dw, header_h), (45, 45, 55), -1)
+            cv2.putText(canvas, "[<-/A] Prev | [->/D/Space] Next | [X/DEL] Hapus | [Q/ESC] Quit",
+                        (12, 112), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 220, 255), 1, cv2.LINE_AA)
+
+            # Tempel gambar ke canvas
+            canvas[header_h:, :] = resized_vis
+
+        cv2.imshow(window_name, canvas)
+
+        # Tunggu tombol navigasi
+        key = cv2.waitKeyEx(0)
+
+        # Handle Tombol Keyboard Cross-Platform
+        if key in (27, ord('q'), ord('Q')):  # ESC / Q
+            break
+        elif key in (ord('x'), ord('X'), 127, 8, 3014656, 65535, 2162688):  # X / Delete / Backspace -> HAPUS
+            img_path, lbl_path = items[current_idx]
+            print(f" 🗑️ Hapus gambar & label: {img_path.name}")
+
+            # Hapus file gambar & file label
+            try:
+                img_path.unlink(missing_ok=True)
+                if lbl_path and lbl_path.exists():
+                    lbl_path.unlink(missing_ok=True)
+            except Exception as e:
+                print(f" ❌ Gagal menghapus {img_path.name}: {e}")
+
+            # Hapus dari daftar di memori
+            items.pop(current_idx)
+
+            if not items:
+                print(" ✅ Semua sampel gambar telah diperiksa/dihapus.")
+                break
+
+            if current_idx >= len(items):
+                current_idx = max(0, len(items) - 1)
+
+        elif key in (83, 65363, 2555904, ord('d'), ord('D'), ord('n'), ord('N'), 32):  # Right Arrow / D / N / Space -> Next
+            current_idx = (current_idx + 1) % len(items)
+        elif key in (81, 65361, 2424832, ord('a'), ord('A'), ord('p'), ord('P')):  # Left Arrow / A / P -> Prev
+            current_idx = (current_idx - 1 + len(items)) % len(items)
+
+    cv2.destroyAllWindows()
+
+
+if __name__ == "__main__":
+    main()
