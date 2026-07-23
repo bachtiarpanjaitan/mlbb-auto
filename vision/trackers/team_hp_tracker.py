@@ -42,7 +42,7 @@ class TeamHPTracker:
 
     def __init__(
         self,
-        frame_reader: FrameReader,
+        frame_reader: FrameReader | None = None,
         interval_sec: float = 0.5,
     ):
         self.reader = frame_reader
@@ -219,6 +219,11 @@ class TeamHPTracker:
         with self._lock:
             self._target_frame = frame_idx
 
+    def process_frame(self, frame: np.ndarray, frame_idx: int, video_time: float):
+        """Proses frame langsung dari main loop tanpa perlu thread terpisah."""
+        if frame is not None and frame.size > 0:
+            self._extract_all_hp(frame, frame_idx, video_time)
 
-def create_team_hp_tracker(frame_reader: FrameReader, **kwargs) -> TeamHPTracker:
+
+def create_team_hp_tracker(frame_reader: FrameReader | None = None, **kwargs) -> TeamHPTracker:
     return TeamHPTracker(frame_reader, **kwargs)

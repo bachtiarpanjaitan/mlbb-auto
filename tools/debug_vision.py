@@ -268,26 +268,35 @@ class DetectorManager:
 
                     self._portrait_saved = True
 
-        # ── Level (Tesseract OCR, karena PaddleOCR mati) ──
-        lvl_img = crop_region(frame, "hero_panel", "level")
-        if lvl_img is not None and lvl_img.size:
-            gray = cv2.cvtColor(lvl_img, cv2.COLOR_BGR2GRAY)
-            _, binary = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY)
-            white_px = cv2.countNonZero(binary)
-            if 5 < white_px < binary.size * 0.3 and gray.mean() < 100:
-                try:
-                    import pytesseract
-                    inv = 255 - binary
-                    big = cv2.resize(inv, (120, 120), interpolation=cv2.INTER_LINEAR)
-                    text = pytesseract.image_to_string(
-                        big, config='--psm 10 --oem 3 digits').strip()
-                    if text and text.isdigit():
-                        val = int(text)
-                        if 1 <= val <= 30:
-                            status["level"] = val
-                            log.debug("Level = %d", val)
-                except Exception:
-                    pass
+        # ── Level (Tesseract OCR, cached setiap 2 detik) ──
+        if not hasattr(self, '_last_lvl_ocr'):
+            self._last_lvl_ocr = 0.0
+            self._cached_level = None
+
+        if self._cached_level is not None:
+            status["level"] = self._cached_level
+
+        if video_time - self._last_lvl_ocr >= 2.0 or self._cached_level is None:
+            lvl_img = crop_region(frame, "hero_panel", "level")
+            if lvl_img is not None and lvl_img.size:
+                gray = cv2.cvtColor(lvl_img, cv2.COLOR_BGR2GRAY)
+                _, binary = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY)
+                white_px = cv2.countNonZero(binary)
+                if 5 < white_px < binary.size * 0.3 and gray.mean() < 100:
+                    try:
+                        import pytesseract
+                        self._last_lvl_ocr = video_time
+                        inv = 255 - binary
+                        big = cv2.resize(inv, (120, 120), interpolation=cv2.INTER_LINEAR)
+                        text = pytesseract.image_to_string(
+                            big, config='--psm 10 --oem 3 digits').strip()
+                        if text and text.isdigit():
+                            val = int(text)
+                            if 1 <= val <= 30:
+                                self._cached_level = val
+                                status["level"] = val
+                    except Exception:
+                        pass
 
         # ── HP ──
         hp_img = crop_region(frame, "hero_panel", "hp_bar")
@@ -1441,20 +1450,61 @@ def main():
 
     BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-    vp = a.video
-    if not vp:
-        vd = os.path.join(BASE, "videos")
-        cs = sorted([f for f in os.listdir(vd) if f.endswith(".mp4")])
-        if not cs:
-            print("No video found in videos/")
-            sys.exit(1)
-        vp = os.path.join(vd, cs[0])
-        print(f"Using: {vp}")
+    vd = os.path.join(BASE, "videos")
+    video_exts = (".mp4", ".mkv", ".avi", ".mov", ".webm")
+    if os.path.exists(vd):
+        cs = sorted([f for f in os.listdir(vd) if f.lower().endswith(video_exts)])
+    else:
+        cs = []
 
-    cap = cv2.VideoCapture(vp)
+    vp = a.video
+    if vp:
+        if os.path.isfile(vp):
+            pass
+        elif vp.isdigit() and cs and 1 <= int(vp) <= len(cs):
+            vp = os.path.join(vd, cs[int(vp) - 1])
+        elif os.path.isfile(os.path.join(vd, vp)):
+            vp = os.path.join(vd, vp)
+        else:
+            print(f"❌ Video file not found: {vp}")
+            sys.exit(1)
+    else:
+        if not cs:
+            print(f"❌ No video found in {vd}")
+            sys.exit(1)
+
+        print("\n🎬 Pilih video untuk di-debug:")
+        for idx, filename in enumerate(cs, 1):
+            filepath = os.path.join(vd, filename)
+            size_mb = os.path.getsize(filepath) / (1024 * 1024)
+            print(f"  [{idx}] {filename} ({size_mb:.1f} MB)")
+
+        while True:
+            try:
+                choice = input(f"\nMasukkan nomor video (1-{len(cs)}) [default: 1]: ").strip()
+                if not choice:
+                    selected_idx = 0
+                else:
+                    selected_idx = int(choice) - 1
+
+                if 0 <= selected_idx < len(cs):
+                    vp = os.path.join(vd, cs[selected_idx])
+                    break
+                else:
+                    print(f"⚠️  Pilihan tidak valid. Harap masukkan nomor antara 1 dan {len(cs)}.")
+            except (ValueError, KeyboardInterrupt, EOFError):
+                print("\n❌ Input dibatalkan.")
+                sys.exit(1)
+
+    print(f"\n📹 Menggunakan video: {os.path.basename(vp)}\n")
+
+    # Gunakan CAP_AVFOUNDATION di macOS untuk Hardware Media Engine (Apple Silicon VideoToolbox)
+    cap = cv2.VideoCapture(vp, cv2.CAP_AVFOUNDATION)
+    if not cap.isOpened():
+        cap = cv2.VideoCapture(vp)
     fps = cap.get(cv2.CAP_PROP_FPS) or 30
     frame_delay = max(1, int(1000 / fps / a.speed))
-    print(f"Video: {fps:.1f} fps — {a.speed:.1f}× speed ({frame_delay}ms delay)")
+    print(f"Video: {fps:.1f} fps — {a.speed:.1f}× speed ({frame_delay}ms delay) [Hardware Decoded]")
 
     # Window size: lebar full screen, height mengikut ratio video
     import tkinter as _tk
@@ -1522,10 +1572,8 @@ def main():
     vision_thread = threading.Thread(target=_vision_worker, daemon=True)
     vision_thread.start()
 
-    # ── Team HP Tracker (thread terpisah untuk HP bar hero) ──
-    hp_reader = FrameReader(vp)
-    hp_tracker = create_team_hp_tracker(hp_reader)
-    hp_tracker.start()
+    # ── Team HP Tracker (proses sinkron di main loop tanpa thread/reader kedua) ──
+    hp_tracker = create_team_hp_tracker()
 
     # ── Overlay: digabung ke main loop (tidak perlu thread terpisah) ──
     # Rendering overlay ringan, tidak butuh thread sendiri
@@ -1633,8 +1681,9 @@ def main():
                     "red_dots": dd.get("red_dots", []),
                     "jungle_dots": dd.get("jungle_dots", [])}
 
-        # ── Sync HP tracker → merge HP untuk blue + red ──
-        hp_tracker.sync_frame(frame_count)
+        # ── Sync HP tracker → extract HP tiap 15 frame (~0.5s) ──
+        if not paused and frame_count % 15 == 0:
+            hp_tracker.process_frame(fr, frame_count, video_time)
         hp_data = hp_tracker.get_all_hp()
         if hp_data:
             for team, status_key in [("blue", "blue_team_heroes"), ("red", "red_team_heroes")]:
@@ -1647,15 +1696,14 @@ def main():
                     if slot is not None and slot in team_hp and team_hp[slot] is not None:
                         hero["hp_pct"] = team_hp[slot]
 
-        # ── Drawing langsung di main loop (overlay thread dihapus) ──
+        # ── Drawing langsung di main loop ──
         if paused and clean_frame is not None:
             draw_src = clean_frame
         else:
             draw_src = fr
         vis_frame = _draw_overlay(draw_src.copy(), current_status, show_grid, layout_edit_mode,
                                    show_help, show_overlay, layout_editor)
-        vis = cv2.resize(vis_frame, (dw, dh))
-        cv2.imshow("MLBB Debug", vis)
+        cv2.imshow("MLBB Debug", vis_frame)
 
         # ── Controls ──
         k = cv2.waitKey(frame_delay) & 0xFF
@@ -1751,7 +1799,6 @@ def main():
     vision_running = False
     minimap_running = False
     hp_tracker.stop()
-    hp_reader.release()
     cap.release()
     cv2.destroyAllWindows()
 
