@@ -60,3 +60,18 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo "  Model: trainings/hero_detector/yolo11n_minimap/weights/best.pt"
 echo "  ONNX:  trainings/hero_detector/yolo11n_minimap/weights/best.onnx"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+# Copy model terbaru ke folder models untuk dipakai langsung
+ONNX_SRC="trainings/hero_detector/yolo11n_minimap/weights/best.onnx"
+ONNX_DST="models/hero_tracker.onnx"
+
+if [ -f "$ONNX_SRC" ]; then
+    mkdir -p models
+    cp "$ONNX_SRC" "$ONNX_DST"
+    echo ""
+    echo "✅ Model copied → $ONNX_DST"
+else
+    echo ""
+    echo "⚠️  ONNX model not found: $ONNX_SRC"
+    echo "   Jalankan export manual jika diperlukan."
+fi

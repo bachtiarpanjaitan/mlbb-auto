@@ -11,6 +11,11 @@ from concurrent.futures import ThreadPoolExecutor
 import cv2
 import numpy as np
 
+# Batasi penggunaan CPU thread agar laptop tidak kepanasan
+os.environ["OMP_NUM_THREADS"] = "2"
+os.environ["MKL_NUM_THREADS"] = "2"
+cv2.setNumThreads(2)
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from vision.core import layout
@@ -167,7 +172,7 @@ class DetectorManager:
 
         # ── Minimap Hero Tracker ──
         self.minimap_hero_tracker = MinimapHeroTracker(
-            yolo_model_path="trainings/hero_detector/yolo11n_minimap/weights/best.pt",
+            yolo_model_path="models/hero_tracker.onnx",
         )
         self._minimap_coord_mapper = CoordinateMapper.from_layout()
 
@@ -198,7 +203,7 @@ class DetectorManager:
         self._cd_confirm_threshold: int = 3  # frames hysteresis
 
         # ── Background thread untuk OCR CD ──
-        self._cd_ocr_executor = ThreadPoolExecutor(max_workers=5)
+        self._cd_ocr_executor = ThreadPoolExecutor(max_workers=2)  # dibatasi untuk hemat CPU
         self._cd_ocr_pending: dict[str, bool] = {}
         self._cd_ocr_last_time: dict[str, float] = {}
         self._cd_ocr_results: dict[str, tuple[float, int]] = {}  # skill_name -> (video_time, remaining_sec)
@@ -1488,7 +1493,8 @@ def main():
     cv2.setMouseCallback("MLBB Debug", _make_mouse_cb(layout_editor, fw, fh, dw, dh), layout_editor)
     layout_edit_mode = False  # editor mati default, tekan E untuk aktifkan
 
-    detect_every = 30
+    detect_every = 45        # deteksi hero panel tiap 45 frame (~1.5s pada 30fps)
+    minimap_every = 3         # minimap tracking tiap 3 frame (hemat CPU)
     frame_count = 0
 
     clean_frame = None  # snapshot saat pause
@@ -1521,43 +1527,27 @@ def main():
     hp_tracker = create_team_hp_tracker(hp_reader)
     hp_tracker.start()
 
-    # ── Overlay Thread ──
-    overlay_queue: queue.Queue = queue.Queue(maxsize=2)
-    display_frame: Any = None
-    display_lock = threading.Lock()
-    overlay_running = True
-
-    def _overlay_worker():
-        nonlocal display_frame
-        while overlay_running:
-            try:
-                frame, status, grid_on, edit_mode, help_on, ov_on, editor = overlay_queue.get(timeout=0.2)
-            except queue.Empty:
-                continue
-            try:
-                if grid_on:
-                    draw_grid(frame)
-                draw_region_boxes(frame)
-                # Draw minimap hero dots + info panel (always if ov_on)
-                if ov_on and status:
-                    draw_minimap_heroes(frame, status)
-                    draw_minimap_hero_overlay(frame, status)
-                # Draw minimap debug overlay (templ match details)
-                if _show_mm_debug and status:
-                    draw_minimap_debug(frame, status)
-                if edit_mode:
-                    editor.draw(frame)
-                if help_on:
-                    draw_help_overlay(frame)
-                if ov_on and status:
-                    draw_status_overlay(frame, status)
-                with display_lock:
-                    display_frame = frame
-            except Exception as e:
-                log.warning("Overlay error: %s", e)
-
-    overlay_thread = threading.Thread(target=_overlay_worker, daemon=True)
-    overlay_thread.start()
+    # ── Overlay: digabung ke main loop (tidak perlu thread terpisah) ──
+    # Rendering overlay ringan, tidak butuh thread sendiri
+    def _draw_overlay(frame, status, grid_on, edit_mode, help_on, ov_on, editor):
+        try:
+            if grid_on:
+                draw_grid(frame)
+            draw_region_boxes(frame)
+            if ov_on and status:
+                draw_minimap_heroes(frame, status)
+                draw_minimap_hero_overlay(frame, status)
+            if _show_mm_debug and status:
+                draw_minimap_debug(frame, status)
+            if edit_mode:
+                editor.draw(frame)
+            if help_on:
+                draw_help_overlay(frame)
+            if ov_on and status:
+                draw_status_overlay(frame, status)
+        except Exception as e:
+            log.warning("Overlay error: %s", e)
+        return frame
 
     # ── Minimap Hero Tracker Thread (thread terpisah untuk tracking hero) ──
     minimap_queue: queue.Queue = queue.Queue(maxsize=2)
@@ -1621,8 +1611,8 @@ def main():
         with vision_status_lock:
             current_status = dict(vision_status) if vision_status else {}
 
-        # ── Minimap tracking (submit ke minimap thread) ──
-        if not paused:
+        # ── Minimap tracking (submit ke minimap thread, tiap minimap_every frame) ──
+        if not paused and frame_count % minimap_every == 0:
             mm_img = crop_region(fr, "map")
             if mm_img is not None and mm_img.size > 0:
                 try:
@@ -1657,23 +1647,14 @@ def main():
                     if slot is not None and slot in team_hp and team_hp[slot] is not None:
                         hero["hp_pct"] = team_hp[slot]
 
-        # ── Drawing (submit ke overlay thread) ──
+        # ── Drawing langsung di main loop (overlay thread dihapus) ──
         if paused and clean_frame is not None:
             draw_src = clean_frame
         else:
             draw_src = fr
-        try:
-            overlay_queue.put_nowait((draw_src.copy(), current_status, show_grid, layout_edit_mode,
-                                      show_help, show_overlay, layout_editor))
-        except queue.Full:
-            pass
-        with display_lock:
-            render = display_frame
-        if render is not None:
-            # Video full width, height mengikut aspect ratio
-            vis = cv2.resize(render, (dw, dh))
-        else:
-            vis = cv2.resize(draw_src, (dw, dh))
+        vis_frame = _draw_overlay(draw_src.copy(), current_status, show_grid, layout_edit_mode,
+                                   show_help, show_overlay, layout_editor)
+        vis = cv2.resize(vis_frame, (dw, dh))
         cv2.imshow("MLBB Debug", vis)
 
         # ── Controls ──
@@ -1767,7 +1748,6 @@ def main():
                       f"size={img.shape if img is not None else 'N/A'}")
 
     # Cleanup
-    overlay_running = False
     vision_running = False
     minimap_running = False
     hp_tracker.stop()
