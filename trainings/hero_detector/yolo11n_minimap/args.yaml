@@ -12,7 +12,7 @@ save_period: -1
 cache: false
 device: mps
 workers: 4
-project: /Users/bachtiarpanjaitan/Projects/personal/mlbb-auto/trainings/hero_detector
+project: trainings/hero_detector
 name: yolo11n_minimap
 exist_ok: true
 pretrained: true
@@ -112,4 +112,4 @@ auto_augment: randaugment
 erasing: 0.4
 cfg: null
 tracker: tracktrack.yaml
-save_dir: /Users/bachtiarpanjaitan/Projects/personal/mlbb-auto/trainings/hero_detector/yolo11n_minimap
+save_dir: trainings/hero_detector/yolo11n_minimap
