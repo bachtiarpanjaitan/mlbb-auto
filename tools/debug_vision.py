@@ -1494,7 +1494,7 @@ def main():
     layout_edit_mode = False  # editor mati default, tekan E untuk aktifkan
 
     detect_every = 45        # deteksi hero panel tiap 45 frame (~1.5s pada 30fps)
-    minimap_every = 3         # minimap tracking tiap 3 frame (hemat CPU)
+    minimap_every = 5         # minimap tracking tiap 5 frame (~6 fps pada 30fps video, sangat hemat CPU)
     frame_count = 0
 
     clean_frame = None  # snapshot saat pause

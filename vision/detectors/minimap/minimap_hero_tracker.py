@@ -54,8 +54,8 @@ AREA_MAX = 250
 
 # ── Template matching config ──
 # Ukuran icon hero di minimap (diameter dalam pixel)
-# Multi-scale diperluas dari 14px s/d 28px untuk mendeteksi berbagai resolusi minimap
-ICON_SIZES = [14, 16, 18, 20, 22, 24, 26, 28]
+# 4 skala saja (hemat CPU, cukup akurat untuk deteksi)
+ICON_SIZES = [16, 20, 24, 28]
 # Confidence threshold untuk template match dianggap valid
 MATCH_THRESHOLD = 0.28  # disesuaikan untuk recall & akurasi matching lebih tinggi
 # NMS overlap threshold (IoU)
