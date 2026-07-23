@@ -32,6 +32,7 @@ import numpy as np
 
 from ...core import layout as layout_mod
 from ...mapper.coordinate_mapper import CoordinateMapper, MapPosition
+from ...mapper.region_mapper import RegionMapper, get_region_mapper
 from ..base import BaseDetector, Detection
 
 logger = logging.getLogger("mlbb.vision.minimap_hero")
@@ -102,6 +103,7 @@ class MinimapHero:
     pixel_y: int = 0            # posisi y dalam pixel minimap
     game_pos: MapPosition | None = None  # posisi dalam game coordinates
     is_dead: bool = False       # apakah hero mati (dot hilang dari minimap)
+    region: str = ""            # nama region dari regions.json (top_lane, river, dll)
 
 
 @dataclass
@@ -160,11 +162,14 @@ class TrackedMinimapHero:
             self.vel_y *= 0.9
 
     def to_minimap_hero(self, frame_idx: int, mapper: CoordinateMapper | None,
-                        minimap_w: int, minimap_h: int) -> MinimapHero:
+                        minimap_w: int, minimap_h: int,
+                        region_mapper: RegionMapper | None = None) -> MinimapHero:
         """Convert to public MinimapHero dataclass."""
         px = int(self.norm_x * minimap_w)
         py = int(self.norm_y * minimap_h)
         game_pos = mapper.minimap_to_game(self.norm_x, self.norm_y) if mapper else None
+        region_name = region_mapper.get_region_at(px, py) if region_mapper else ""
+
         return MinimapHero(
             name=self.name,
             team=self.team,
@@ -178,6 +183,7 @@ class TrackedMinimapHero:
             pixel_y=py,
             game_pos=game_pos,
             is_dead=False,
+            region=region_name,
         )
 
 
@@ -275,6 +281,9 @@ class MinimapHeroTracker:
             _, _, mm_w, mm_h = mm_bbox
             mm_size = minimap_size or max(mm_w, mm_h)
             self._mapper = CoordinateMapper(minimap_size=mm_size)
+
+        # Region mapper (for @bottom/@top -> named regions)
+        self._region_mapper = get_region_mapper()
 
         # Layout info (untuk pixel coordinate)
         self._minimap_bbox = minimap_bbox or layout_mod.bbox("map") or (80, 0, 350, 340)
@@ -1570,10 +1579,10 @@ class MinimapHeroTracker:
             blue_mask=bm, red_mask=rm, blue_all_cnt=self._last_circles)
 
         # ── 9. Result (heroes + jungle) ──
-        result = [h.to_minimap_hero(frame_idx, self._mapper, self._mm_w, self._mm_h)
+        result = [h.to_minimap_hero(frame_idx, self._mapper, self._mm_w, self._mm_h, self._region_mapper)
                   for h in self._tracked.values() if h.miss_count < self.max_miss_frames]
         result.extend(
-            j.to_minimap_hero(frame_idx, self._mapper, self._mm_w, self._mm_h)
+            j.to_minimap_hero(frame_idx, self._mapper, self._mm_w, self._mm_h, self._region_mapper)
             for j in self._tracked_jungle.values() if j.miss_count < self.max_miss_frames
         )
         return result
@@ -1586,14 +1595,14 @@ class MinimapHeroTracker:
         if tracked is None or tracked.miss_count >= self.max_miss_frames:
             return None
         return tracked.to_minimap_hero(
-            self._current_frame, self._mapper, self._mm_w, self._mm_h,
+            self._current_frame, self._mapper, self._mm_w, self._mm_h, self._region_mapper,
         )
 
     def get_all_positions(self) -> list[MinimapHero]:
         """Get positions of all currently visible heroes."""
         return [
             h.to_minimap_hero(
-                self._current_frame, self._mapper, self._mm_w, self._mm_h,
+                self._current_frame, self._mapper, self._mm_w, self._mm_h, self._region_mapper,
             )
             for h in self._tracked.values()
             if h.miss_count < self.max_miss_frames
@@ -1603,7 +1612,7 @@ class MinimapHeroTracker:
         """Get positions of all visible heroes for a team."""
         return [
             h.to_minimap_hero(
-                self._current_frame, self._mapper, self._mm_w, self._mm_h,
+                self._current_frame, self._mapper, self._mm_w, self._mm_h, self._region_mapper,
             )
             for h in self._tracked.values()
             if h.team == team and h.miss_count < self.max_miss_frames
@@ -1613,7 +1622,7 @@ class MinimapHeroTracker:
         """Get positions of all currently visible jungle objectives."""
         return [
             j.to_minimap_hero(
-                self._current_frame, self._mapper, self._mm_w, self._mm_h,
+                self._current_frame, self._mapper, self._mm_w, self._mm_h, self._region_mapper,
             )
             for j in self._tracked_jungle.values()
             if j.miss_count < self.max_miss_frames
@@ -1723,6 +1732,7 @@ class MinimapHeroDetector(BaseDetector):
                         "game_y": h.game_pos.y if h.game_pos else None,
                         "lane": h.game_pos.lane if h.game_pos else None,
                         "nearest_landmark": h.game_pos.nearest_landmark if h.game_pos else None,
+                        "region": h.region,
                     }
                     for h in heroes
                 ],

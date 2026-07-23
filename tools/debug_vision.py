@@ -26,9 +26,9 @@ from vision.trackers.team_hp_tracker import TeamHPTracker, create_team_hp_tracke
 from vision.core.frame_reader import FrameReader
 import json
 
-logging.basicConfig(level=logging.WARNING)
+logging.basicConfig(level=logging.ERROR)
 log = logging.getLogger("debug_vision")
-log.setLevel(logging.INFO)
+log.setLevel(logging.ERROR)
 
 
 # ── Detector Manager ──────────────────────────────────────────────────
@@ -981,7 +981,8 @@ def draw_minimap_hero_overlay(frame: np.ndarray, status: dict[str, Any]):
                 for entry in sorted(team_heroes, key=lambda x: x.get("name") or ""):
                     name = entry.get("name") or "?"
                     gx, gy = entry.get("game_x"), entry.get("game_y")
-                    loc = entry.get("nearest") or entry.get("lane") or ""
+                    # Use region from regions.json (RegionMapper)
+                    region = entry.get("region") or ""
                     conf = entry.get("confidence", 0)
 
                     conf_color = (100, 255, 100) if conf > 0.8 else (0, 255, 255) if conf > 0.5 else (0, 0, 255)
@@ -992,8 +993,8 @@ def draw_minimap_hero_overlay(frame: np.ndarray, status: dict[str, Any]):
                         nxy = f"({entry['norm_x']:.2f}, {entry['norm_y']:.2f})"
                         text = f"  {name}: {nxy}"
 
-                    if loc:
-                        text += f" @{loc}"
+                    if region:
+                        text += f" @{region}"
 
                     lines.append((text, conf_color))
 
@@ -1006,22 +1007,27 @@ def draw_minimap_hero_overlay(frame: np.ndarray, status: dict[str, Any]):
                 if c_name.startswith("jungle_"):
                     c_name = "jungle"
                 gx, gy = entry.get("game_x"), entry.get("game_y")
-                loc = entry.get("nearest") or entry.get("lane") or ""
+                region = entry.get("region") or ""
                 conf = entry.get("confidence", 0)
                 if gx is not None and gy is not None:
                     text = f"  {c_name}: ({gx:.0f}, {gy:.0f})"
                 else:
                     text = f"  {c_name}: ({entry['norm_x']:.2f}, {entry['norm_y']:.2f})"
-                if loc:
-                    text += f" @{loc}"
+                if region:
+                    text += f" @{region}"
                 lines.append((text, (100, 255, 100)))
     else:
         lines.append(("  (waiting for detection)", (180, 180, 180)))
 
     # ── Draw panel ──
-    panel_w = 340
     line_h = 24
     pad = 10
+    max_tw = 0
+    for text, _ in lines:
+        (tw, _), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+        if tw > max_tw:
+            max_tw = tw
+    panel_w = max(440, max_tw + pad * 2 + 20)
     total_h = len(lines) * line_h + pad * 2
 
     panel_x = 10
@@ -1576,7 +1582,8 @@ def main():
                      "game_x": round(h.game_pos.x, 1) if h.game_pos else None,
                      "game_y": round(h.game_pos.y, 1) if h.game_pos else None,
                      "lane": h.game_pos.lane if h.game_pos else None,
-                     "nearest": h.game_pos.nearest_landmark if h.game_pos else None}
+                     "nearest": h.game_pos.nearest_landmark if h.game_pos else None,
+                     "region": h.region}
                     for h in mm_heroes
                 ]
                 debug_data = detector_mgr.minimap_hero_tracker.get_last_debug_data()
