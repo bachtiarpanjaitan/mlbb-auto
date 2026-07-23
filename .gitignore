@@ -29,7 +29,6 @@ Thumbs.db
 *.code-workspace
 
 # ── Project ──
-videos/
 *.mp4
 *.mov
 *.avi
