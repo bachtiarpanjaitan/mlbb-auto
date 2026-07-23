@@ -246,6 +246,7 @@ class MinimapHeroTracker:
         # Tracked jungle objectives (separate from heroes)
         self._tracked_jungle: dict[str, TrackedMinimapHero] = {}  # key -> jungle obj
         self._jungle_counter: int = 0
+        self._jungle_camp_seen: set[str] = set()  # fixed camp IDs that have ever been seen alive
 
         # Roster dari TeamDetector
         self._roster: dict[str, str] = {}  # hero_name -> team
@@ -279,8 +280,7 @@ class MinimapHeroTracker:
         if use_coordinate_mapper:
             mm_bbox = minimap_bbox or layout_mod.bbox("map") or (80, 0, 350, 340)
             _, _, mm_w, mm_h = mm_bbox
-            mm_size = minimap_size or max(mm_w, mm_h)
-            self._mapper = CoordinateMapper(minimap_size=mm_size)
+            self._mapper = CoordinateMapper(minimap_w=mm_w, minimap_h=mm_h)
 
         # Region mapper (for @bottom/@top -> named regions)
         self._region_mapper = get_region_mapper()
@@ -1276,6 +1276,7 @@ class MinimapHeroTracker:
                 camp = self._find_matching_camp(nx, ny, name_filter=jungle_name)
                 if camp:
                     key = camp["id"]          # e.g. "blue_buff_blue"
+                    self._jungle_camp_seen.add(key)
                     target_nx, target_ny = camp["norm_x"], camp["norm_y"]
                 else:
                     # Unknown location for this jungle type (non-standard map?)
@@ -1289,6 +1290,7 @@ class MinimapHeroTracker:
                 camp = self._find_matching_camp(nx, ny)
                 if camp:
                     key = camp["id"]
+                    self._jungle_camp_seen.add(key)
                     target_nx, target_ny = camp["norm_x"], camp["norm_y"]
                     display_name = camp["name"]
                     conf = 0.80
@@ -1628,6 +1630,44 @@ class MinimapHeroTracker:
             if j.miss_count < self.max_miss_frames
         ]
 
+    def get_jungle_status(self) -> dict[str, str]:
+        """
+        Status untuk semua 15 fixed jungle camps.
+
+        Returns:
+            {"lord": "alive", "turtle": "taken", "blue_buff_blue": "unknown", ...}
+            - alive  : icon terlihat di minimap (camp masih hidup)
+            - taken  : pernah terlihat sebelumnya, sekarang hilang (udah diambil)
+            - unknown: belum pernah terlihat (fog of war / awal game)
+        """
+        status: dict[str, str] = {}
+
+        # Kumpulin posisi tracked jungle yang saat ini visible
+        tracked_positions = []
+        for key, jobj in self._tracked_jungle.items():
+            if jobj.miss_count < self.max_miss_frames:
+                tracked_positions.append((jobj.norm_x, jobj.norm_y))
+
+        for camp in JUNGLE_CAMPS:
+            cid = camp["id"]
+            cx, cy = camp["norm_x"], camp["norm_y"]
+            radius = camp.get("radius", 0.07)
+
+            # Apakah ada tracked jungle di radius camp ini?
+            alive = any(
+                ((tx - cx) ** 2 + (ty - cy) ** 2) ** 0.5 <= radius
+                for tx, ty in tracked_positions
+            )
+
+            if alive:
+                status[cid] = "alive"
+            elif cid in self._jungle_camp_seen:
+                status[cid] = "taken"
+            else:
+                status[cid] = "unknown"
+
+        return status
+
     def get_last_debug_data(self) -> dict | None:
         """Return debug data from last frame."""
         return self._last_debug
@@ -1670,6 +1710,7 @@ class MinimapHeroTracker:
         self._bg_red = None
         self._pos_history.clear()
         self._pos_history_frames = 0
+        self._jungle_camp_seen.clear()
         logger.info("MinimapHeroTracker reset")
 
 

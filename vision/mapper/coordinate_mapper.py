@@ -33,49 +33,51 @@ class MapPosition:
 class CoordinateMapper:
     """
     Mapper minimap → game coordinates.
+    Dengan koreksi aspek rasio: game map square, minimap mungkin rectangular.
+    Misal minimap 350×340 → efektif 340×340 (padding 5px tiap sisi horizontal).
 
     Args:
-        minimap_size: Size of minimap side in pixels (used for scale calc).
-                       Default from layout.yaml atau fallback 340.
-        map_size: Game map size in units (default 10000).
+        minimap_w: Lebar minimap dalam pixel (default dari layout.yaml).
+        minimap_h: Tinggi minimap dalam pixel (default dari layout.yaml).
+        map_size: Game map size dalam units (default 10000).
     """
 
     def __init__(
         self,
-        minimap_size: int | None = None,
+        minimap_w: int | None = None,
+        minimap_h: int | None = None,
         map_size: int = MAP_SIZE,
     ):
         # Ambil dari layout.yaml jika tidak specified
-        if minimap_size is None:
+        if minimap_w is None or minimap_h is None:
             mm_bbox = layout_mod.bbox("map")
             if mm_bbox:
                 _, _, mm_w, mm_h = mm_bbox
-                self.minimap_size = max(mm_w, mm_h)
+                minimap_w = minimap_w or mm_w
+                minimap_h = minimap_h or mm_h
             else:
-                self.minimap_size = 340  # fallback
-        else:
-            self.minimap_size = minimap_size
+                minimap_w = minimap_w or 350
+                minimap_h = minimap_h or 340
 
+        self.minimap_w = minimap_w
+        self.minimap_h = minimap_h
         self.map_size = map_size
-
-        # Scale factor: game units per normalized unit
-        # Normalized 0-1 maps to 0-MAP_SIZE
-        self.scale = map_size
 
     @classmethod
     def from_layout(cls) -> CoordinateMapper:
         """Create mapper from layout.yaml minimap bbox."""
-        mm_bbox = layout_mod.bbox("map")
-        if mm_bbox:
-            _, _, mm_w, mm_h = mm_bbox
-            mm_size = max(mm_w, mm_h)
-        else:
-            mm_size = 340
-        return cls(minimap_size=mm_size)
+        mm_bbox = layout_mod.bbox("map") or (80, 0, 350, 340)
+        _, _, mm_w, mm_h = mm_bbox
+        return cls(minimap_w=mm_w, minimap_h=mm_h)
 
     def minimap_to_game(self, norm_x: float, norm_y: float) -> MapPosition:
         """
         Convert normalized minimap position (0-1) to game coordinates.
+        Dengan koreksi aspek rasio untuk minimap rectangular.
+
+        Game map square (10000×10000) dipetakan ke area square
+        di dalam minimap. Padding pada sumbu yang lebih panjang
+        otomatis dihilangkan.
 
         Args:
             norm_x: Normalized x on minimap (0=left, 1=right).
@@ -88,8 +90,26 @@ class CoordinateMapper:
         nx = max(0.0, min(1.0, norm_x))
         ny = max(0.0, min(1.0, norm_y))
 
+        # ── Koreksi aspek rasio ──
+        # Game map square, minimap mungkin rectangular.
+        # Effective game area = square dengan sisi min(w, h).
+        if self.minimap_w > self.minimap_h:
+            # Minimap lebih lebar → horizontal padding
+            effective = self.minimap_h
+            padding = (self.minimap_w - effective) / 2
+            nx = (nx * self.minimap_w - padding) / effective
+        elif self.minimap_h > self.minimap_w:
+            # Minimap lebih tinggi → vertical padding
+            effective = self.minimap_w
+            padding = (self.minimap_h - effective) / 2
+            ny = (ny * self.minimap_h - padding) / effective
+        # else: sudah square, tidak perlu koreksi
+
+        # Clamp ulang setelah koreksi
+        nx = max(0.0, min(1.0, nx))
+        ny = max(0.0, min(1.0, ny))
+
         # Linear mapping: normalized 0-1 → game 0-MAP_SIZE
-        # MLBB: top-left minimap = top-left game map (origin)
         game_x = nx * self.map_size
         game_y = ny * self.map_size
 
@@ -117,14 +137,14 @@ class CoordinateMapper:
         Args:
             px: Pixel x within minimap region.
             py: Pixel y within minimap region.
-            mm_w: Minimap width in pixels (default: minimap_size).
-            mm_h: Minimap height in pixels (default: minimap_size).
+            mm_w: Minimap width in pixels (default: self.minimap_w).
+            mm_h: Minimap height in pixels (default: self.minimap_h).
 
         Returns:
             MapPosition.
         """
-        w = mm_w or self.minimap_size
-        h = mm_h or self.minimap_size
+        w = mm_w or self.minimap_w
+        h = mm_h or self.minimap_h
         norm_x = px / max(1, w)
         norm_y = py / max(1, h)
         return self.minimap_to_game(norm_x, norm_y)

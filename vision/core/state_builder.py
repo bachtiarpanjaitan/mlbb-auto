@@ -134,7 +134,7 @@ class StateBuilder:
         if kda := detections.get("hero_panel.kda"):
             hero.kda = str(kda.value).strip()
 
-        for skill_name in ("passive", "skill_1", "skill_2", "skill_3", "battle_spell"):
+        for skill_name in ("passive", "skill_1", "skill_2", "skill_3", "skill_4", "battle_spell"):
             key = f"hero_panel.skills.{skill_name}"
             if key in detections:
                 hero.skills_available[skill_name] = bool(detections[key].value)

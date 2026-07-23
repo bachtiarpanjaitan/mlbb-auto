@@ -29,6 +29,8 @@ from vision.detectors.minimap.minimap_hero_tracker import MinimapHeroTracker
 from vision.mapper.coordinate_mapper import CoordinateMapper
 from vision.trackers.team_hp_tracker import TeamHPTracker, create_team_hp_tracker
 from vision.core.frame_reader import FrameReader
+from vision.exporters import GameStateExporter
+from pathlib import Path
 import json
 
 logging.basicConfig(level=logging.ERROR)
@@ -471,7 +473,7 @@ class DetectorManager:
 
         # ── Skills ──
         skills_status: dict[str, dict] = {}
-        for skill_name in ("passive", "skill_1", "skill_2", "skill_3", "battle_spell"):
+        for skill_name in ("passive", "skill_1", "skill_2", "skill_3", "skill_4", "battle_spell"):
             skill_img = crop_region(frame, "hero_panel", "skills", skill_name)
             if skill_img is not None and skill_img.size:
                 result = self.skills_det.run(skill_img)
@@ -652,7 +654,7 @@ class DetectorManager:
         Capture reference images untuk tiap skill — hanya saat brightness
         mengindikasikan skill dalam kondisi ready (tidak cooldown).
         """
-        for skill_name in ("passive", "skill_1", "skill_2", "skill_3", "battle_spell"):
+        for skill_name in ("passive", "skill_1", "skill_2", "skill_3", "skill_4", "battle_spell"):
             if hasattr(self, '_cd_ref_images') and skill_name in self._cd_ref_images:
                 continue
             img = crop_region(frame, "hero_panel", "skills", skill_name)
@@ -1033,6 +1035,11 @@ def draw_minimap_hero_overlay(frame: np.ndarray, status: dict[str, Any]):
     else:
         lines.append(("  (waiting for detection)", (180, 180, 180)))
 
+    # ── Shortcut bar ──
+    lines.append(("─── Shortcuts ───────", (100, 100, 120)))
+    lines.append(("Space:Pause  G:Grid  O:Overlay  M:Minimap", (130, 130, 130)))
+    lines.append(("E:Editor  S:Save  R:Restart  P/p:Export  H:Help  Q:Quit", (130, 130, 130)))
+
     # ── Draw panel ──
     line_h = 24
     pad = 10
@@ -1099,6 +1106,15 @@ def draw_status_overlay(frame: np.ndarray, status: dict[str, Any]):
 
     lines.append(("----- HERO PANEL -----", (200, 200, 255)))
 
+    # Export status indicator
+    if status.get("_export_enabled"):
+        cnt = status.get("_export_count", 0)
+        lines.append((f"📊 PARQUET: ON ({cnt} frames)", (100, 255, 100)))
+    elif status.get("_export_count", 0) > 0:
+        lines.append((f"📊 PARQUET: OFF (buffered)", (200, 200, 100)))
+    else:
+        lines.append(("📊 PARQUET: OFF", (150, 150, 150)))
+
     if status.get("hero_name"):
         lines.append((f"Hero:  {status['hero_name']}", (255, 255, 255)))
     if status.get("level") is not None:
@@ -1121,29 +1137,30 @@ def draw_status_overlay(frame: np.ndarray, status: dict[str, Any]):
     skills = status.get("skills", {})
     if skills:
         lines.append(("____ Skills ____", (100, 200, 255)))
-        for name in ("passive", "skill_1", "skill_2", "skill_3", "battle_spell"):
-            if name in skills:
-                s = skills[name]
-                if name == "battle_spell" and s.get("spell_name"):
-                    label = f"SPELL({s['spell_name']})"
-                else:
-                    label = name.replace("skill_", "S").replace("battle_spell", "SPELL")
+        for name in ("passive", "skill_1", "skill_2", "skill_3", "skill_4", "battle_spell"):
+            if name not in skills:
+                continue
+            s = skills[name]
+            if name == "battle_spell" and s.get("spell_name"):
+                label = f"SPELL({s['spell_name']})"
+            else:
+                label = name.replace("skill_", "S").replace("battle_spell", "SPELL")
 
-                if s.get("ready", False):
-                    text = f"  {label}: READY"
-                    color = (100, 255, 100)
-                elif s.get("cooldown", False):
-                    remaining = s.get("remaining_cd")
-                    if remaining is not None and remaining > 0:
-                        text = f"  {label}: CD({remaining:.0f}s)"
-                    else:
-                        text = f"  {label}: CD"
-                    color = (255, 100, 100)
+            if s.get("ready", False):
+                text = f"  {label}: READY"
+                color = (100, 255, 100)
+            elif s.get("cooldown", False):
+                remaining = s.get("remaining_cd")
+                if remaining is not None and remaining > 0:
+                    text = f"  {label}: CD({remaining:.0f}s)"
                 else:
-                    text = f"  {label}: --"
-                    color = (200, 200, 200)
+                    text = f"  {label}: CD"
+                color = (255, 100, 100)
+            else:
+                text = f"  {label}: --"
+                color = (200, 200, 200)
 
-                lines.append((text, color))
+            lines.append((text, color))
 
     # Items
     item_list = status.get("items", [])
@@ -1224,6 +1241,7 @@ _HELP_LINES = [
     ("H", "Toggle this help"),
     ("L", "Reload layout.yaml"),
     ("R", "Restart video"),
+    ("P/p", "Toggle Parquet export"),
     ("D", "Re-detect (paused)"),
     ("Z", "Debug region sizes"),
     ("Drag handles", "Move / resize regions"),
@@ -1498,6 +1516,11 @@ def main():
 
     print(f"\n📹 Menggunakan video: {os.path.basename(vp)}\n")
 
+    # ── Parquet Exporter ──
+    exporter = GameStateExporter(os.path.join(BASE, "data", "game_states"), flush_every=0)
+    export_enabled = False
+    match_id = Path(vp).stem  # "alpha_1", "franco_1", dll
+
     # Gunakan CAP_AVFOUNDATION di macOS untuk Hardware Media Engine (Apple Silicon VideoToolbox)
     cap = cv2.VideoCapture(vp, cv2.CAP_AVFOUNDATION)
     if not cap.isOpened():
@@ -1612,6 +1635,7 @@ def main():
                 continue
             try:
                 mm_heroes = detector_mgr.minimap_hero_tracker.update(mm_img, fc)
+                jungle_status = detector_mgr.minimap_hero_tracker.get_jungle_status()
                 heroes_data = [
                     {"name": h.name, "team": h.team,
                      "norm_x": round(h.norm_x, 3), "norm_y": round(h.norm_y, 3),
@@ -1628,6 +1652,7 @@ def main():
                 with minimap_result_lock:
                     minimap_result = {
                         "heroes": heroes_data,
+                        "jungle_status": jungle_status,
                         "debug": debug_data,
                     }
             except Exception as e:
@@ -1640,6 +1665,8 @@ def main():
         if not paused:
             r, fr = cap.read()
             if not r:
+                if export_enabled and exporter.count > 0:
+                    exporter.flush_and_reset(match_id or f"match_{int(time.time())}")
                 cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                 frame_count = 0
                 continue
@@ -1673,6 +1700,7 @@ def main():
             mm_data = dict(minimap_result) if minimap_result else {}
         if mm_data:
             current_status["minimap_heroes"] = mm_data.get("heroes", [])
+            current_status["jungle_status"] = mm_data.get("jungle_status", {})
             current_status["minimap_tracking_active"] = True
             dd = mm_data.get("debug")
             if dd:
@@ -1696,6 +1724,15 @@ def main():
                     if slot is not None and slot in team_hp and team_hp[slot] is not None:
                         hero["hp_pct"] = team_hp[slot]
 
+        # ── Export ke Parquet (tiap frame, hanya saat recording dan tidak pause) ──
+        if export_enabled and not paused:
+            exporter.append(frame_count, video_time, current_status)
+
+        # Inject export status for overlay display
+        current_status["_export_enabled"] = export_enabled
+        current_status["_export_count"] = exporter.count
+        current_status["_export_total"] = exporter.total_exported
+
         # ── Drawing langsung di main loop ──
         if paused and clean_frame is not None:
             draw_src = clean_frame
@@ -1708,6 +1745,9 @@ def main():
         # ── Controls ──
         k = cv2.waitKey(frame_delay) & 0xFF
         if k in (ord("q"), 27):
+            if export_enabled and exporter.count > 0:
+                exporter.flush_and_reset(match_id or f"match_{int(time.time())}")
+                print(f"📊 Exported {exporter.total_exported} frames total")
             break
         if k == ord(" "):
             paused ^= True
@@ -1715,12 +1755,18 @@ def main():
             if paused:
                 clean_frame = fr.copy()
                 print("⏸ Paused")
+                # Flush parquet saat pause supaya buffer gak numpuk terus
+                if export_enabled and exporter.count > 0:
+                    exporter.flush(f"{match_id}_pause_{int(time.time())}")
             else:
                 layout_editor.selected = None
                 layout_editor.mode = None
                 print("▶ Resumed")
                 vision_queue.put_nowait((fr.copy(), frame_count, frame_count / fps))
         if k == ord("r"):
+            # Flush parquet sebelum restart
+            if export_enabled and exporter.count > 0:
+                exporter.flush_and_reset(match_id or f"match_{int(time.time())}")
             cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
             detector_mgr._cd_timers.clear()
             detector_mgr._cd_seen_ready.clear()
@@ -1775,6 +1821,12 @@ def main():
             path = os.path.join(BASE, f"debug_frame_{ts}.png")
             cv2.imwrite(path, vis)
             print(f"📸 Frame saved: {path}")
+        if k in (ord("P"), ord("p")):  # P / p — toggle parquet export
+            if export_enabled:
+                exporter.flush_and_reset(match_id or f"match_{int(time.time())}")
+            export_enabled ^= True
+            print(f"📊 Parquet export: {'ON' if export_enabled else 'OFF'}"
+                  f" ({exporter.count} frames in buffer)")
         if k == ord("e"):
             layout_edit_mode ^= True
             layout_editor.edit_mode = layout_edit_mode
