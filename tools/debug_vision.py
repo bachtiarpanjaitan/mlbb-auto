@@ -23,6 +23,7 @@ from vision.core.cropper import crop_region
 from vision.ocr.reader import OCRReader
 from vision.detectors import HPDetector, ManaDetector, LevelDetector, GoldDetector
 from vision.detectors import SkillsDetector
+from vision.detectors.skills.cd_number import CDNumberDetector
 from vision.matcher.template import TemplateMatcher
 from vision.detectors.team.blue_team import BlueTeamDetector, RedTeamDetector, create_red_team_detector
 from vision.detectors.minimap.minimap_hero_tracker import MinimapHeroTracker
@@ -50,7 +51,9 @@ class DetectorManager:
         self.level_det = LevelDetector(self.ocr)
         self.gold_det = GoldDetector(self.ocr)
         self.skills_det = SkillsDetector(self.ocr)
+        self.cd_number_det = CDNumberDetector()
         self._cached_hero_name: str | None = None
+        self._cd_smooth: dict[str, int] = {}  # skill_name -> last stable CD number
 
         # ── Load hero database ──
         base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -191,9 +194,6 @@ class DetectorManager:
         self._last_spell_identify_time: float = -999.0
         self._spell_identify_interval: float = 5.0  # retry identifikasi setiap 5 detik
 
-        # ── Battle spell reference comparison ──
-        self._spell_ref_image: np.ndarray | None = None
-        self._spell_ref_captured: bool = False
         self._spell_cd_end: float = 0.0  # timer spell (independent dari _cd_timers)
 
         # ── Cooldown tracker ──
@@ -248,8 +248,8 @@ class DetectorManager:
             else:
                 status["hero_name"] = "...scanning"
 
-        # ── Simpan sample portrait ke .tmp/ (sekali saja, untuk referensi) ──
-        if not getattr(self, '_portrait_saved', False) and video_time > 3:
+        # ── Simpan sample portrait ke .tmp/ (setelah hero teridentifikasi) ──
+        if not getattr(self, '_portrait_saved', False) and self._cached_hero_name:
             base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
             tmp_dir = os.path.join(base_dir, ".tmp")
             os.makedirs(tmp_dir, exist_ok=True)
@@ -258,15 +258,22 @@ class DetectorManager:
             if portrait_img is not None and portrait_img.size > 0:
                 gray = cv2.cvtColor(portrait_img, cv2.COLOR_BGR2GRAY)
                 if gray.mean() > 40:
-                    cv2.imwrite(os.path.join(tmp_dir, "hero_portrait_crop.png"), portrait_img)
-                    log.info("📸 Hero portrait saved to .tmp/hero_portrait_crop.png")
+                    fname = f"portrait_{self._cached_hero_name}.png"
+                    cv2.imwrite(os.path.join(tmp_dir, fname), portrait_img)
+                    log.info("📸 Portrait saved: .tmp/%s", fname)
 
-                    # Simpan beberapa template pembanding
-                    for h in ["alpha", "lancelot", "tigreal", "franco", "carmilla"]:
-                        tpath = os.path.join(base_dir, "assets", "heroes", f"{h}.png")
-                        if os.path.exists(tpath):
-                            img = cv2.imread(tpath)
-                            cv2.imwrite(os.path.join(tmp_dir, f"template_{h}.png"), cv2.resize(img, (110, 100)))
+                    # Simpan template pembanding dari hero yang terdeteksi
+                    hero_path = os.path.join(base_dir, "assets", "heroes", f"{self._cached_hero_name}.png")
+                    if os.path.exists(hero_path):
+                        tmpl = cv2.imread(hero_path)
+                        if tmpl is not None:
+                            pt_region = layout.get_region("hero_panel", "portrait")
+                            if pt_region and "bbox" in pt_region:
+                                pw, ph = pt_region["bbox"][2], pt_region["bbox"][3]
+                            else:
+                                pw, ph = 110, 100
+                            cv2.imwrite(os.path.join(tmp_dir, f"template_{self._cached_hero_name}.png"),
+                                        cv2.resize(tmpl, (pw, ph)))
 
                     self._portrait_saved = True
 
@@ -520,42 +527,7 @@ class DetectorManager:
                     if self._cached_spell_key:
                         skill_info["spell_name"] = self._cached_spell_key
 
-                # ═══ Battle spell: cooldown via reference comparison ═══
-                if skill_name == "battle_spell":
-                    # Capture reference di t~1s (spell pasti ready)
-                    if not self._spell_ref_captured and video_time >= 1.0:
-                        gray_check = cv2.cvtColor(skill_img, cv2.COLOR_BGR2GRAY)
-                        if gray_check.mean() > 80:
-                            self._spell_ref_image = skill_img.copy()
-                            self._spell_ref_captured = True
-                            log.info("📸 Spell reference captured at t=%.1fs", video_time)
-
-                    # Bandingkan tiap frame vs reference
-                    if self._spell_ref_captured and self._spell_ref_image is not None:
-                        ref_g = cv2.cvtColor(self._spell_ref_image, cv2.COLOR_BGR2GRAY)
-                        cur_g = cv2.cvtColor(skill_img, cv2.COLOR_BGR2GRAY)
-                        corr = float(cv2.matchTemplate(ref_g, cur_g, cv2.TM_CCOEFF_NORMED)[0][0])
-
-                        if corr < 0.80:
-                            # Berbeda → cooldown
-                            skill_info["ready"] = False
-                            skill_info["cooldown"] = True
-
-                            # Timer independent (gak kepengaruh _update_skill_cooldown)
-                            if self._spell_cd_end <= video_time:
-                                cd_sec = self._cached_spell_cd or 90.0
-                                self._spell_cd_end = video_time + cd_sec
-
-                            remaining = max(0.0, self._spell_cd_end - video_time)
-                            if remaining > 0:
-                                skill_info["remaining_cd"] = round(remaining, 1)
-                        else:
-                            # Sama → ready
-                            skill_info["ready"] = True
-                            skill_info["cooldown"] = False
-                            skill_info.pop("remaining_cd", None)
-                            self._spell_cd_end = 0.0
-
+                # ═══ Battle spell: model CNN sudah handle lewat _update_skill_cooldown ═══
                 skills_status[skill_name] = skill_info
         if skills_status:
             status["skills"] = skills_status
@@ -642,6 +614,38 @@ class DetectorManager:
             return cooldowns[0]  # level 1 = cooldown paling panjang
         return skill_data.get("cooldown")
 
+    def _get_skill_unlock_level(self, skill_name: str) -> int:
+        """
+        Tentukan level hero saat skill ini terbuka.
+
+        Baca dari `unlock_level` di heroes.json.
+        """
+        # Map layout skill_name → database key
+        db_key = {"skill_3": "ultimate", "skill_4": "special_skill"}.get(skill_name, skill_name)
+
+        # passive, battle_spell → level 1
+        if db_key in ("passive", "battle_spell"):
+            return 1
+        if db_key not in ("ultimate", "special_skill", "skill_1", "skill_2"):
+            return 1
+
+        # Cek dari database hero
+        if not self._cached_hero_name:
+            return 1 if db_key not in ("ultimate", "special_skill") else 4
+
+        hero_key = self._hero_key_from_name(self._cached_hero_name)
+        if not hero_key or hero_key not in self._hero_db:
+            return 1 if db_key not in ("ultimate", "special_skill") else 4
+
+        hero = self._hero_db.get(hero_key, {})
+        skill_data = hero.get("skills", {}).get(db_key, {})
+        unlock_lvl = skill_data.get("unlock_level")
+        if unlock_lvl is not None:
+            return int(unlock_lvl)
+
+        # Fallback
+        return 4 if db_key in ("ultimate", "special_skill") else 1
+
     def _hero_key_from_name(self, hero_name: str) -> str | None:
         """Convert hero display name → database key."""
         for key, hero in self._hero_db.items():
@@ -723,78 +727,28 @@ class DetectorManager:
     def _update_skill_cooldown(self, skill_name: str, skill_img: np.ndarray | None,
                                skill_info: dict[str, Any], video_time: float = 0):
         """
-        Update cooldown tracking — hybrid: SkillsDetector + timer + template matching.
+        Update skill state — model CNN sebagai sumber kebenaran.
 
-        Flow:
-          1. Timer aktif → override state ke CD dengan remaining time (smoothing)
-          2. SkillsDetector + template matching → combined signal
-          3. Hysteresis 3-frame konfirmasi sebelum flip state
-          4. Set timer dari OCR/base_cooldown saat CD terkonfirmasi
-          5. TIDAK ada default override — trust combined signal
+        Model udah belajar dari pixel icon skill (ready/cooldown/available/locked).
+        Gak perlu hysteresis, timer, CDR, atau reference comparison lagi.
         """
-        vt = video_time
-        if skill_img is not None and skill_img.size:
-            self._try_read_cd_async(skill_name, skill_img, vt)
-
-        timer_end = self._cd_timers.get(skill_name)
-
-        # ═══ Combined signal: SkillsDetector + template matching ═══
-        is_cd_visual = skill_info.get("cooldown", False) or (
-            skill_img is not None and self._check_cooldown_visual(skill_name, skill_img)
-        )
-        is_ready_visual = skill_info.get("ready", False) and not is_cd_visual
-
-        # ═══ Hysteresis (3-frame confirmation) ═══
-        if is_cd_visual:
-            cc = self._cd_confirm_count.get(skill_name, 0) + 1
-            self._cd_confirm_count[skill_name] = cc
-            self._cd_ready_count.pop(skill_name, None)
-        else:
-            rc = self._cd_ready_count.get(skill_name, 0) + 1
-            self._cd_ready_count[skill_name] = rc
-            self._cd_confirm_count.pop(skill_name, None)
-
-        cd_confirmed = self._cd_confirm_count.get(skill_name, 0) >= self._cd_confirm_threshold
-        ready_confirmed = self._cd_ready_count.get(skill_name, 0) >= self._cd_confirm_threshold
-
-        # ═══ READY TERKONFIRMASI → clear timer, tampilkan ready ═══
-        if ready_confirmed:
-            self._cd_timers.pop(skill_name, None)
-            self._cd_seen_ready.add(skill_name)
-            skill_info["ready"] = True
+        # ═══ Level gating: cek apakah skill sudah terbuka sesuai level hero ═══
+        hero_lvl = getattr(self, '_cached_level', None) or 0
+        unlock_lvl = self._get_skill_unlock_level(skill_name)
+        if unlock_lvl > 0 and hero_lvl < unlock_lvl:
+            skill_info["ready"] = False
             skill_info["cooldown"] = False
+            skill_info["available"] = False
+            skill_info["locked"] = True
             skill_info.pop("remaining_cd", None)
             return
 
-        # ═══ CD TERKONFIRMASI → set timer ═══
-        if cd_confirmed:
-            skill_info["cooldown"] = True
-            skill_info["ready"] = False
-            skill_info.pop("remaining_cd", None)
+        # ═══ Model CNN sebagai sumber kebenaran ═══
+        # "available" (highlight border) = siap dipakai
+        if skill_info.get("available", False):
+            skill_info["ready"] = True
 
-            ocr_data = self._cd_ocr_results.pop(skill_name, None)
-            if ocr_data:
-                _, remaining = ocr_data
-                self._cd_timers[skill_name] = vt + remaining
-                skill_info["remaining_cd"] = round(remaining, 1)
-            elif skill_name in self._cd_seen_ready:
-                cd_sec = self._get_base_cooldown(skill_name)
-                if cd_sec:
-                    cdr_mult = 1.0 if skill_name == "battle_spell" else (1 - self._cdr)
-                    actual_cd = cd_sec * cdr_mult
-                    self._cd_timers[skill_name] = vt + actual_cd
-                    skill_info["remaining_cd"] = round(actual_cd, 1)
-            return
-
-        # ═══ BELUM TERKONFIRMASI → pakai timer sebagai estimasi ═══
-        if timer_end is not None and timer_end > vt:
-            skill_info["cooldown"] = True
-            skill_info["ready"] = False
-            skill_info["remaining_cd"] = round(timer_end - vt, 1)
-        elif timer_end is not None:
-            self._cd_timers.pop(skill_name, None)
-
-        # ═══ Trust combined signal, NO override ═══
+        # Hapus field yang gak diperlukan
         skill_info.pop("remaining_cd", None)
 
 
@@ -1039,6 +993,7 @@ def draw_minimap_hero_overlay(frame: np.ndarray, status: dict[str, Any]):
     lines.append(("─── Shortcuts ───────", (100, 100, 120)))
     lines.append(("Space:Pause  G:Grid  O:Overlay  M:Minimap", (130, 130, 130)))
     lines.append(("E:Editor  S:Save  R:Restart  P/p:Export  H:Help  Q:Quit", (130, 130, 130)))
+    lines.append(("c:CropSkills  C:Auto  l:Locked  L:LockedAuto  -:Slower  =:Faster", (130, 130, 130)))
 
     # ── Draw panel ──
     line_h = 24
@@ -1104,6 +1059,11 @@ def draw_status_overlay(frame: np.ndarray, status: dict[str, Any]):
     # ── Build status lines ──
     lines: list[tuple[str, tuple[int, int, int]]] = []
 
+    # Speed indicator
+    spd = status.get("_speed", 1.0)
+    spd_color = (100, 255, 100) if spd >= 1.0 else (200, 200, 100)
+    lines.append((f"⏵ Speed: {spd:.2f}×", spd_color))
+
     lines.append(("----- HERO PANEL -----", (200, 200, 255)))
 
     # Export status indicator
@@ -1114,6 +1074,19 @@ def draw_status_overlay(frame: np.ndarray, status: dict[str, Any]):
         lines.append((f"📊 PARQUET: OFF (buffered)", (200, 200, 100)))
     else:
         lines.append(("📊 PARQUET: OFF", (150, 150, 150)))
+
+    # Skill dataset collection status
+    sc = status.get("_skill_collect", False)
+    sc_cnt = status.get("_skill_collect_count", 0)
+    locked = status.get("_skill_collect_locked", False)
+    if locked:
+        lines.append((f"🔒 LOCKED AUTO: ON ({sc_cnt} frames)", (255, 200, 100)))
+    elif sc:
+        lines.append((f"💾 SKILL DATA: ON ({sc_cnt} frames)", (100, 255, 100)))
+    elif sc_cnt > 0:
+        lines.append((f"💾 SKILL DATA: OFF ({sc_cnt} saved)", (200, 200, 100)))
+    else:
+        lines.append(("💾 SKILL DATA: OFF", (150, 150, 150)))
 
     if status.get("hero_name"):
         lines.append((f"Hero:  {status['hero_name']}", (255, 255, 255)))
@@ -1146,7 +1119,10 @@ def draw_status_overlay(frame: np.ndarray, status: dict[str, Any]):
             else:
                 label = name.replace("skill_", "S").replace("battle_spell", "SPELL")
 
-            if s.get("ready", False):
+            if s.get("locked", False):
+                text = f"  {label}: LOCKED"
+                color = (100, 100, 100)
+            elif s.get("ready", False):
                 text = f"  {label}: READY"
                 color = (100, 255, 100)
             elif s.get("cooldown", False):
@@ -1244,6 +1220,10 @@ _HELP_LINES = [
     ("P/p", "Toggle Parquet export"),
     ("D", "Re-detect (paused)"),
     ("Z", "Debug region sizes"),
+    ("c / C", "Save skill crops / Auto-collect skill data"),
+    ("l / L", "Save locked / Auto-collect locked (stun/CC)"),
+    ("t", "Toggle skill mode (CNN Model / CV Legacy)"),
+    ("- / =", "Slow down / Speed up (0.5× step)"),
     ("Drag handles", "Move / resize regions"),
 ]
 
@@ -1454,9 +1434,70 @@ def _save_layout(editor: _LayoutEditor):
     editor.dirty = False
 
 
+# ── Skill Dataset Collection (dipanggil dari key binding) ─────────────
+
+_auto_collect_count = 0
+_auto_collect_skills = False
+_auto_collect_locked = False
+_locked_end_time = 0.0
+
+def _collect_skill_samples(frame: np.ndarray, detector: DetectorManager,
+                            frame_idx: int, video_time: float,
+                            force_label: str | None = None):
+    """Save cropped skill icons from current frame (per-hero folder).
+
+    Labeling pake model CNN. Kalau force_label diisi, semua crop disimpan
+    ke folder label tersebut (override hasil model).
+    """
+    global _auto_collect_count
+    base_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "trainings", "hero_skills", "dataset")
+
+    hero_name = getattr(detector, '_cached_hero_name', None) or "unknown"
+    skill_slots = ("skill_1", "skill_2", "skill_3", "battle_spell")
+
+    saved = 0
+    for skill_name in skill_slots:
+        skill_img = crop_region(frame, "hero_panel", "skills", skill_name)
+        if skill_img is None or skill_img.size == 0:
+            continue
+
+        if force_label:
+            label = force_label
+        else:
+            # Dapatkan label dari detector
+            result = detector.skills_det.run(skill_img)
+            label = "unknown"
+            if result and result.value:
+                v = result.value if isinstance(result.value, dict) else {}
+                if v.get("cooldown"):
+                    label = "cooldown"
+                elif v.get("available"):
+                    label = "available"
+                elif v.get("ready"):
+                    label = "ready"
+                elif v.get("locked"):
+                    label = "locked"
+
+        # Path: trainings/hero_skills/dataset/<hero>/<slot>/<label>/
+        save_dir = os.path.join(base_dir, hero_name, skill_name, label)
+        os.makedirs(save_dir, exist_ok=True)
+        existing = len(os.listdir(save_dir))
+        fname = f"debug_f{frame_idx:06d}_{existing:03d}.png"
+        cv2.imwrite(os.path.join(save_dir, fname), skill_img)
+        saved += 1
+
+    if saved:
+        _auto_collect_count += 1
+        hero_info = f" ({hero_name})" if hero_name != "unknown" else ""
+        label_info = f" [{force_label}]" if force_label else ""
+        print(f"💾 Saved {saved} skill crops{hero_info}{label_info} (frame {frame_idx}, t={video_time:.1f}s)")
+
+
 # ── Main ──────────────────────────────────────────────────────────────
 
 def main():
+    global _auto_collect_skills, _auto_collect_count, _auto_collect_locked, _locked_end_time
     ap = argparse.ArgumentParser()
     ap.add_argument("video", nargs="?")
     ap.add_argument("--overlay", action="store_true", default=True,
@@ -1467,6 +1508,14 @@ def main():
     a = ap.parse_args()
 
     BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    # ── Reset .tmp/ di setiap startup ──
+    tmp_dir = os.path.join(BASE, ".tmp")
+    if os.path.exists(tmp_dir):
+        import shutil
+        shutil.rmtree(tmp_dir)
+        print("🧹 Cleared .tmp/")
+    os.makedirs(tmp_dir, exist_ok=True)
 
     vd = os.path.join(BASE, "videos")
     video_exts = (".mp4", ".mkv", ".avi", ".mov", ".webm")
@@ -1516,6 +1565,54 @@ def main():
 
     print(f"\n📹 Menggunakan video: {os.path.basename(vp)}\n")
 
+    
+
+    # ── Layout: pilih 3 skill atau 4 skill ──
+
+    layout_file = os.path.join(BASE, "vision", "layout.yaml")
+
+    try:
+
+        inp = input("🎮 Layout skills [3/4] (default: 3): ").strip()
+
+        if inp == "4":
+
+            src = os.path.join(BASE, "vision", "layout_4_skill.yaml")
+
+            if os.path.exists(src):
+
+                import shutil
+
+                shutil.copy2(src, layout_file)
+
+                layout._LAYOUT_CACHE.clear()
+
+                print("   ✅ Layout: 4 skill (ultimate di skill_4)")
+
+            else:
+
+                print("   ⚠️  layout_4_skill.yaml tidak ditemukan, pakai 3 skill")
+
+        else:
+
+            src = os.path.join(BASE, "vision", "layout_3_skill.yaml")
+
+            if os.path.exists(src):
+
+                import shutil
+
+                shutil.copy2(src, layout_file)
+
+                layout._LAYOUT_CACHE.clear()
+
+                print("   ✅ Layout: 3 skill (default)")
+
+    except (EOFError, KeyboardInterrupt):
+
+        print("   ✅ Layout: 3 skill (default)")
+
+    
+
     # ── Parquet Exporter ──
     exporter = GameStateExporter(os.path.join(BASE, "data", "game_states"), flush_every=0)
     export_enabled = False
@@ -1526,8 +1623,13 @@ def main():
     if not cap.isOpened():
         cap = cv2.VideoCapture(vp)
     fps = cap.get(cv2.CAP_PROP_FPS) or 30
-    frame_delay = max(1, int(1000 / fps / a.speed))
-    print(f"Video: {fps:.1f} fps — {a.speed:.1f}× speed ({frame_delay}ms delay) [Hardware Decoded]")
+    speed_mult = a.speed  # bisa diubah via [ (slower) / ] (faster)
+
+    def _calc_delay(mult: float) -> int:
+        return max(1, int(1000 / fps / mult))
+
+    frame_delay = _calc_delay(speed_mult)
+    print(f"Video: {fps:.1f} fps — {speed_mult:.1f}× speed ({frame_delay}ms delay) [Hardware Decoded]")
 
     # Window size: lebar full screen, height mengikut ratio video
     import tkinter as _tk
@@ -1671,13 +1773,19 @@ def main():
                 frame_count = 0
                 continue
 
+            # Frame skipping untuk speed tinggi
+            skip_frames = int(speed_mult / 2) if speed_mult >= 4 else 0
+            for _ in range(skip_frames):
+                r_skip = cap.grab()
+                if not r_skip:
+                    break
+                frame_count += 1
+
         # ── Detection (submit ke vision thread) ──
         if not paused:
             frame_count += 1
             video_time = frame_count / fps
             if frame_count == 1 or frame_count % detect_every == 0:
-                # Capture skill reference images for template matching
-                detector_mgr.capture_skill_references(fr)
                 try:
                     vision_queue.put_nowait((fr.copy(), frame_count, video_time))
                 except queue.Full:
@@ -1685,6 +1793,57 @@ def main():
         # Baca status terbaru dari vision thread
         with vision_status_lock:
             current_status = dict(vision_status) if vision_status else {}
+
+        # ── Reapply CD numbers setelah vision thread update (anti flicker) ──
+        skills_dict = current_status.get("skills")
+        if skills_dict and detector_mgr._cd_smooth:
+            for sn, cd_val in list(detector_mgr._cd_smooth.items()):
+                if sn in skills_dict:
+                    skills_dict[sn]["remaining_cd"] = cd_val
+
+        # ── Skills detection cepat di main thread (tiap ~0.17s, update overlay) ──
+        if not paused and frame_count % 5 == 0:
+            try:
+                skills_status = {}
+                for sn in ("skill_1", "skill_2", "skill_3", "skill_4", "battle_spell"):
+                    si = crop_region(fr, "hero_panel", "skills", sn)
+                    if si is not None and si.size:
+                        r = detector_mgr.skills_det.run(si)
+                        if r and r.value:
+                            info = dict(r.value)
+                            detector_mgr._update_skill_cooldown(sn, si, info, video_time)
+                            if sn == "battle_spell" and detector_mgr._cached_spell_key:
+                                info["spell_name"] = detector_mgr._cached_spell_key
+                            # Baca angka cooldown dengan smoothing (anti flicker)
+                            if info.get("cooldown", False):
+                                cd_val = detector_mgr.cd_number_det.read(si)
+                                if cd_val is not None and 1 <= cd_val <= 120:
+                                    prev = detector_mgr._cd_smooth.get(sn)
+                                    if prev is None:
+                                        detector_mgr._cd_smooth[sn] = cd_val
+                                        info["remaining_cd"] = cd_val
+                                    elif cd_val <= prev:
+                                        # Countdown menurun → update
+                                        detector_mgr._cd_smooth[sn] = cd_val
+                                        info["remaining_cd"] = cd_val
+                                    elif cd_val >= prev + 5:
+                                        # Lompatan besar → skill dipake lagi (CD baru)
+                                        detector_mgr._cd_smooth[sn] = cd_val
+                                        info["remaining_cd"] = cd_val
+                                    else:
+                                        # Naik dikit (flicker) → tetap pake prev
+                                        info["remaining_cd"] = prev
+                                elif prev is not None:
+                                    # Cooldown tapi angka gak kebaca → tetap pake prev
+                                    info["remaining_cd"] = prev
+                            else:
+                                # Skill gak cooldown → hapus smoothing
+                                detector_mgr._cd_smooth.pop(sn, None)
+                            skills_status[sn] = info
+                if skills_status:
+                    current_status["skills"] = skills_status
+            except Exception:
+                pass
 
         # ── Minimap tracking (submit ke minimap thread, tiap minimap_every frame) ──
         if not paused and frame_count % minimap_every == 0:
@@ -1728,10 +1887,29 @@ def main():
         if export_enabled and not paused:
             exporter.append(frame_count, video_time, current_status)
 
-        # Inject export status for overlay display
+        # Inject export + skill dataset status for overlay display
         current_status["_export_enabled"] = export_enabled
         current_status["_export_count"] = exporter.count
         current_status["_export_total"] = exporter.total_exported
+        current_status["_skill_collect"] = _auto_collect_skills or _auto_collect_locked
+        current_status["_skill_collect_count"] = _auto_collect_count
+        current_status["_skill_collect_locked"] = _auto_collect_locked
+        current_status["_speed"] = speed_mult
+
+        # ── Auto-collect skill dataset (jika aktif, setiap ~1 detik) ──
+        # Auto-stop locked setelah 1 detik
+        if _auto_collect_locked and video_time >= _locked_end_time:
+            _auto_collect_locked = False
+            print(f"🔒 Auto-collect locked: OFF (1s selesai)")
+
+        if not paused and (_auto_collect_skills or _auto_collect_locked):
+            _last_ac = getattr(_collect_skill_samples, '_last_time', -999.0)
+            if video_time - _last_ac >= 0.5:
+                _collect_skill_samples._last_time = video_time
+                if _auto_collect_locked:
+                    _collect_skill_samples(fr, detector_mgr, frame_count, video_time, force_label="locked")
+                else:
+                    _collect_skill_samples(fr, detector_mgr, frame_count, video_time)
 
         # ── Drawing langsung di main loop ──
         if paused and clean_frame is not None:
@@ -1779,8 +1957,6 @@ def main():
             detector_mgr._cached_spell_key = None
             detector_mgr._cached_spell_cd = None
             detector_mgr._last_spell_identify_time = -999.0
-            detector_mgr._spell_ref_image = None
-            detector_mgr._spell_ref_captured = False
             detector_mgr._spell_cd_end = 0.0
             detector_mgr._cached_hero_name = None
             # Reset team scanners
@@ -1814,6 +1990,22 @@ def main():
         if k == ord("l"):
             layout._LAYOUT_CACHE.clear()
             print("🔄 Layout reloaded!")
+        if k == ord("c"):
+            # Save skill crops dataset (collect samples from current frame)
+            _collect_skill_samples(fr, detector_mgr, frame_count, video_time)
+        if k == ord("C"):
+            # Toggle auto-collect mode
+            _auto_collect_skills = not _auto_collect_skills
+            print(f"💾 Auto-collect skills: {'ON' if _auto_collect_skills else 'OFF'}")
+        if k == ord("l"):
+            # Save skill crops as LOCKED (force label, bypass model)
+            _collect_skill_samples(fr, detector_mgr, frame_count, video_time, force_label="locked")
+        if k == ord("L"):
+            # Auto-collect locked mode: 1 detik ke depan
+            _auto_collect_locked = True
+            _auto_collect_skills = False
+            _locked_end_time = video_time + 1.0
+            print(f"🔒 Auto-collect locked: ON (until t={video_time+1.0:.1f}s)")
         if k == ord("s"):
             _save_layout(layout_editor)
         if k == ord("S"):  # Shift+S = screenshot
@@ -1840,6 +2032,14 @@ def main():
         if k == ord("h"):
             show_help ^= True
             print(f"Help: {'ON' if show_help else 'OFF'}")
+        if k == ord("="):  # Speed up (+0.5x)
+            speed_mult = min(10.0, speed_mult + 0.5)
+            frame_delay = _calc_delay(speed_mult)
+            print(f"⏩ Speed: {speed_mult:.2f}x ({frame_delay}ms delay)")
+        if k == ord("-"):  # Slow down (-0.5x)
+            speed_mult = max(0.25, speed_mult - 0.5)
+            frame_delay = _calc_delay(speed_mult)
+            print(f"⏪ Speed: {speed_mult:.2f}x ({frame_delay}ms delay)")
         if k == ord("z"):
             # Debug: print crop results for all regions
             for path, reg in layout.enumerate_regions():

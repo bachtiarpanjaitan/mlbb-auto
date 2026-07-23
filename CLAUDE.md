@@ -150,3 +150,6 @@ Defines all screen regions by bbox coordinates (x, y, w, h) for 2400×1080 resol
 - **Velocity-gated position smoothing** for minimap tracking — rejects outlier detections, coasts with prediction + damping
 - **CV-based fallback** (HSV contour detection + HoughCircles) when YOLO model is unavailable
 - **3-frame hysteresis** for skill cooldown state changes to prevent flickering
+
+
+untuk tmp debug gunakan folder .tmp di root project

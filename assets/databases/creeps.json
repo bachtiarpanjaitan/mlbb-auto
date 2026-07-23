@@ -1,0 +1,330 @@
+[
+  {
+    "id": 1,
+    "key": "lithowanderer",
+    "name": "Lithowanderer",
+    "type": "Common",
+    "meta": {
+      "first_appear": "35s",
+      "first_appear_seconds": 35,
+      "refresh": "2 mins (120s)",
+      "refresh_seconds": 120,
+      "loots": "The killer is followed byWalkie Grass, restoring all nearby allied heroes'Manaby1% per second. Increases the killer'sMovement Speedin the river by15%. Also spawns a friendlyStone Roamerat their location that patrols around for45s. If an enemy enters its sight range, it issues an alert and reveals its location, but can be attacked by enemies.",
+      "ability": "Lithowanderer is very mild. It won't attack back even when it is under attack.",
+      "rarity": "Common"
+    },
+    "attributes": {
+      "hp": {
+        "initial_attr": 2251.0,
+        "attr_per_min": 345.9,
+        "attr_after_12_min": 6056.0
+      },
+      "physicalatk": {
+        "initial_attr": null,
+        "attr_per_min": null,
+        "attr_after_12_min": null
+      },
+      "physicaldef": {
+        "initial_attr": 60.0,
+        "attr_per_min": null,
+        "attr_after_12_min": null
+      },
+      "magicdef": {
+        "initial_attr": 0.0,
+        "attr_per_min": null,
+        "attr_after_12_min": null
+      }
+    }
+  },
+  {
+    "id": 2,
+    "key": "crab",
+    "name": "Crab",
+    "type": "Common",
+    "meta": {
+      "first_appear": "3min,Little Crab: 42s",
+      "first_appear_seconds": 180,
+      "refresh": "120s,Little Crab: 20s",
+      "refresh_seconds": 120,
+      "loots": "Gold Buff:The killer gains a Gold Buff that will last for 18s and provide 60 extra Gold. To the Little Crab, the killer will gain 30 extra Gold in 10s.",
+      "ability": "Launches an attack every 1s, dealing(+100% Total Physical Attack)Physical Damage.In the first 2 minutes, Little Crab that is weaker than the Crab will be refreshed on the battlefield more frequently."
+    },
+    "attributes": {
+      "hp": {
+        "initial_attr": 3640.0,
+        "attr_per_min": 384.3,
+        "attr_after_12_min": 7867.0
+      },
+      "physicalatk": {
+        "initial_attr": 55.0,
+        "attr_per_min": 1.15,
+        "attr_after_12_min": 68.0
+      },
+      "physicaldef": {
+        "initial_attr": 37.0,
+        "attr_per_min": null,
+        "attr_after_12_min": null
+      },
+      "magicdef": {
+        "initial_attr": 37.0,
+        "attr_per_min": null,
+        "attr_after_12_min": null
+      }
+    }
+  },
+  {
+    "id": 3,
+    "key": "fire_beetle",
+    "name": "Fire Beetle",
+    "type": "Common",
+    "meta": {
+      "first_appear": "39s",
+      "first_appear_seconds": 39,
+      "refresh": "70s",
+      "refresh_seconds": 70,
+      "loots": "Healing Buff: Restores 5% Mana and 350 HP in 2s.",
+      "ability": "Launches an attack every 1s, dealing(+100% Total Physical Attack)Physical Damage.When Fire Beetle is killed, its carcass will turn into a weaker Little Fire Beetle that can survive up to 15s.",
+      "rarity": "Common"
+    },
+    "attributes": {
+      "hp": {
+        "initial_attr": 2501.0,
+        "attr_per_min": 126.69,
+        "attr_after_12_min": 3895.0
+      },
+      "physicalatk": {
+        "initial_attr": 113.0,
+        "attr_per_min": 2.3,
+        "attr_after_12_min": 138.0
+      },
+      "physicaldef": {
+        "initial_attr": 37.0,
+        "attr_per_min": null,
+        "attr_after_12_min": null
+      },
+      "magicdef": {
+        "initial_attr": 37.0,
+        "attr_per_min": null,
+        "attr_after_12_min": null
+      }
+    }
+  },
+  {
+    "id": 4,
+    "key": "horned_lizard",
+    "name": "Horned Lizard",
+    "type": "Common",
+    "meta": {
+      "first_appear": "40s",
+      "first_appear_seconds": 40,
+      "refresh": "70s",
+      "refresh_seconds": 70,
+      "loots": "Healing Buff: Restores 5% Mana and 350 HP in 2s.",
+      "ability": "Launches an attack every 1s, dealing(+100% Total Physical Attack)Physical Damage.Arouses the potential when HP is lower than 50%, increasing Physical and Magic Defense by 70.",
+      "rarity": "Common"
+    },
+    "attributes": {
+      "hp": {
+        "initial_attr": 3019.0,
+        "attr_per_min": 156.69,
+        "attr_after_12_min": 4743.0
+      },
+      "physicalatk": {
+        "initial_attr": 110.0,
+        "attr_per_min": 2.3,
+        "attr_after_12_min": 135.0
+      },
+      "physicaldef": {
+        "initial_attr": 37.0,
+        "attr_per_min": null,
+        "attr_after_12_min": null
+      },
+      "magicdef": {
+        "initial_attr": 37.0,
+        "attr_per_min": null,
+        "attr_after_12_min": null
+      }
+    }
+  },
+  {
+    "id": 5,
+    "key": "lava_golem",
+    "name": "Lava Golem",
+    "type": "Common",
+    "meta": {
+      "first_appear": "31s",
+      "first_appear_seconds": 31,
+      "refresh": "1.17 mins (70s)",
+      "refresh_seconds": 70,
+      "loots": "Healing Buff: Restores 5% Mana and 350 HP in 2s.",
+      "ability": "Launches an attack every 1s, dealing(+100% Total Physical Attack)Physical Damage.",
+      "rarity": "Common"
+    },
+    "attributes": {
+      "hp": {
+        "initial_attr": 3000.0,
+        "attr_per_min": 81.5,
+        "attr_after_12_min": 3897.0
+      },
+      "physicalatk": {
+        "initial_attr": 156.0,
+        "attr_per_min": 2.3,
+        "attr_after_12_min": 238.0
+      },
+      "physicaldef": {
+        "initial_attr": 37.0,
+        "attr_per_min": null,
+        "attr_after_12_min": null
+      },
+      "magicdef": {
+        "initial_attr": 37.0,
+        "attr_per_min": null,
+        "attr_after_12_min": null
+      }
+    }
+  },
+  {
+    "id": 6,
+    "key": "molten_fiend",
+    "name": "Molten Fiend",
+    "type": "Elite",
+    "meta": {
+      "first_appear": "20s",
+      "first_appear_seconds": 20,
+      "refresh": "90s",
+      "refresh_seconds": 90,
+      "loots": "Molten Morale: In the next 75s, each time the killer attacks the enemy Heroes, the Soul of Lava will attack them once, dealing extra damage and slowing them for 1s based on the killer's Role. The attack has a CD of 3s.Assassin/Fighter/Tank: 5% Adaptive Penetration, deals 50(+20% Total Physical ATK)(+0.3%)extraTrue Damageand slows the targets by 60%.Marksman/Mage/Support: 10% Adaptive Penetration, deals 50(+30% Total Physical ATK)(+0.5%)extraTrue Damageand slows the target by 20%.",
+      "ability": "Launches an attack every 1s, dealing(+100% Total Physical ATK)Physical Damage.When killed, drops 3 Fruits that will disappear after 5s. Heroes will restore 153(+1% Total Physical Attack)HP and 0.2% Mana when picking it."
+    },
+    "attributes": {
+      "hp": {
+        "initial_attr": 4941.0,
+        "attr_per_min": 158.22,
+        "attr_after_12_min": 8111.0
+      },
+      "physicalatk": {
+        "initial_attr": 214.0,
+        "attr_per_min": 3.84,
+        "attr_after_12_min": 256.0
+      },
+      "physicaldef": {
+        "initial_attr": 37.0,
+        "attr_per_min": 2.0,
+        "attr_after_12_min": 59.0
+      },
+      "magicdef": {
+        "initial_attr": 37.0,
+        "attr_per_min": 2.0,
+        "attr_after_12_min": 59.0
+      }
+    }
+  },
+  {
+    "id": 7,
+    "key": "thunder_fenrir",
+    "name": "Thunder Fenrir",
+    "type": "Elite",
+    "meta": {
+      "first_appear": "25s",
+      "first_appear_seconds": 25,
+      "refresh": "90s",
+      "refresh_seconds": 90,
+      "loots": "Thunder Morale: In the next 75s, reduces all skill's CD by10%, Mana Cost by60%, Energy Cost by25%.When killing an enemy unit, restores HP based on the type of the unit. If the unit is a minion, restores3%. If the unit is a Hero, restores8%. If the unit is a Creep, restores12%.",
+      "ability": "Launches an attack every 1s, dealing(+100% Total Physical ATK)Physical Damage.When killed, drops 3 Fruits that will disappear after 5s. Heroes will restore 153(+1% Total Physical ATK)HP and 0.2% Mana when picking it."
+    },
+    "attributes": {
+      "hp": {
+        "initial_attr": 4090.0,
+        "attr_per_min": 230.22,
+        "attr_after_12_min": 6622.0
+      },
+      "physicalatk": {
+        "initial_attr": 226.0,
+        "attr_per_min": 3.84,
+        "attr_after_12_min": 268.0
+      },
+      "physicaldef": {
+        "initial_attr": 60.0,
+        "attr_per_min": 2.0,
+        "attr_after_12_min": 72.0
+      },
+      "magicdef": {
+        "initial_attr": 0.0,
+        "attr_per_min": null,
+        "attr_after_12_min": null
+      }
+    }
+  },
+  {
+    "id": 8,
+    "key": "lord",
+    "name": "Lord",
+    "type": "Legend",
+    "meta": {
+      "first_appear": "2 minutes after the last turtle8 min",
+      "first_appear_seconds": 120,
+      "refresh": "3 min2.5 min (after 18 min)",
+      "refresh_seconds": 180,
+      "loots": "Greatly enhances the attributes for the Minions of the next 1 wave. Meanwhile, the Lord will helps the team push down the enemy's weakest lane until death.Right at his first spawn, Lord has the ability to charge at an enemy turret and dealsTrue Damagefor once.At12 min, Lord will beEvolved, gains Damage Reduction and allows nearby allied heroes to deal extraMagic Damageon their attacks with2sCD.",
+      "ability": "Launches an attack every 1s, dealing(+100% Total Physical ATK)True Damage.Thunder Strike: Launches a Strike every 4s, dealing(+110% Total Physical ATK)True Damageto enemies in a large area.Ocean Force: Launches a Slash every 8s, dealing(+150% Total Physical ATK)True Damageto nearby enemies, then knocking them airborne for 1s.The attributes of Lord will stop growing at 18 minutes."
+    },
+    "attributes": {
+      "hp": {
+        "initial_attr": 31743.0,
+        "attr_per_min": 2242.0,
+        "attr_after_12_min": 42953.0
+      },
+      "physicalatk": {
+        "initial_attr": 428.0,
+        "attr_per_min": 20.15,
+        "attr_after_12_min": 670.0
+      },
+      "physicaldef": {
+        "initial_attr": 37.0,
+        "attr_per_min": null,
+        "attr_after_12_min": null
+      },
+      "magicdef": {
+        "initial_attr": 37.0,
+        "attr_per_min": null,
+        "attr_after_12_min": null
+      }
+    }
+  },
+  {
+    "id": 9,
+    "key": "turtle",
+    "name": "Turtle",
+    "type": "Legend",
+    "meta": {
+      "first_appear": "120s (2 min)",
+      "first_appear_seconds": 120,
+      "refresh": "120s,Stop Respawning: 8 min",
+      "refresh_seconds": 120,
+      "loots": "Turtle's Blessing: The killer gains ashieldthat can absorb 400(+40*Hero Level) Damage when the killer doesn't take any damage in5s. The shield can increase the killer'sPhysical Attackby 20(+2*Hero Level),Magic Powerby 25(+4*Hero Level). Allied heroes also receive a one-time shield by 200(+20*Hero Level).",
+      "ability": "Launch an attack every 1s, dealing(+100% Total Physical ATK)Physical Damage"
+    },
+    "attributes": {
+      "hp": {
+        "initial_attr": 10367.0,
+        "attr_per_min": 1067.15,
+        "attr_after_12_min": null
+      },
+      "physicalatk": {
+        "initial_attr": 260.0,
+        "attr_per_min": 21.72,
+        "attr_after_12_min": null
+      },
+      "physicaldef": {
+        "initial_attr": 15.0,
+        "attr_per_min": 10.0,
+        "attr_after_12_min": null
+      },
+      "magicdef": {
+        "initial_attr": 15.0,
+        "attr_per_min": 10.0,
+        "attr_after_12_min": null
+      }
+    }
+  }
+]

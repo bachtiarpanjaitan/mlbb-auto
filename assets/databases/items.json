@@ -1,0 +1,1222 @@
+[
+  {
+    "id": 1,
+    "key": "berserker_s_fury",
+    "name": "Berserker's Fury",
+    "tier": 3,
+    "category": "Attack",
+    "price": 2390,
+    "attributes": {
+      "physical_attack": 65,
+      "critical_chance": 25,
+      "unique_attribute": "+ 40% Critical Damage"
+    }
+  },
+  {
+    "id": 2,
+    "key": "blade_of_despair",
+    "name": "Blade of Despair",
+    "tier": 3,
+    "category": "Attack",
+    "price": 3010,
+    "attributes": {
+      "physical_attack": 160,
+      "movement_speed": 5
+    }
+  },
+  {
+    "id": 3,
+    "key": "blade_of_the_heptaseas",
+    "name": "Blade of the Heptaseas",
+    "tier": 3,
+    "category": "Attack",
+    "price": 1950,
+    "attributes": {
+      "hp": 250,
+      "physical_attack": 70,
+      "unique_attribute": "+ 15 Physical Penetration"
+    }
+  },
+  {
+    "id": 4,
+    "key": "corrosion_scythe",
+    "name": "Corrosion Scythe",
+    "tier": 3,
+    "category": "Attack",
+    "price": 2050,
+    "attributes": {
+      "attack_speed": 30,
+      "physical_attack": 30,
+      "movement_speed": 5
+    }
+  },
+  {
+    "id": 5,
+    "key": "demon_hunter_sword",
+    "name": "Demon Hunter Sword",
+    "tier": 3,
+    "category": "Attack",
+    "price": 2180,
+    "attributes": {
+      "attack_speed": 20,
+      "physical_attack": 35
+    }
+  },
+  {
+    "id": 6,
+    "key": "endless_battle",
+    "name": "Endless Battle",
+    "tier": 3,
+    "category": "Attack",
+    "price": 2330,
+    "attributes": {
+      "hp": 250,
+      "mana_regen": 5,
+      "hybrid_lifesteal": 8,
+      "physical_attack": 60,
+      "cooldown_reduction": 10,
+      "movement_speed": 5
+    }
+  },
+  {
+    "id": 7,
+    "key": "fleeting_time",
+    "name": "Fleeting Time",
+    "tier": 3,
+    "category": "AttackMagicDefense",
+    "price": 2050,
+    "attributes": {
+      "hp": 600,
+      "adaptive_attack": 30,
+      "cooldown_reduction": 15
+    }
+  },
+  {
+    "id": 8,
+    "key": "golden_staff",
+    "name": "Golden Staff",
+    "tier": 3,
+    "category": "Attack",
+    "price": 2000,
+    "attributes": {
+      "attack_speed": 15,
+      "physical_attack": 55
+    }
+  },
+  {
+    "id": 9,
+    "key": "great_dragon_spear",
+    "name": "Great Dragon Spear",
+    "tier": 3,
+    "category": "Attack",
+    "price": 2140,
+    "attributes": {
+      "physical_attack": 70,
+      "cooldown_reduction": 10,
+      "critical_chance": 20
+    }
+  },
+  {
+    "id": 10,
+    "key": "haas_s_claws",
+    "name": "Haas's Claws",
+    "tier": 3,
+    "category": "Attack",
+    "price": 2020,
+    "attributes": {
+      "attack_speed": 15,
+      "physical_attack": 40,
+      "critical_chance": 20,
+      "unique_attribute": "+ 20% Lifesteal"
+    }
+  },
+  {
+    "id": 11,
+    "key": "hunter_strike",
+    "name": "Hunter Strike",
+    "tier": 3,
+    "category": "Attack",
+    "price": 2010,
+    "attributes": {
+      "physical_attack": 80,
+      "cooldown_reduction": 10,
+      "unique_attribute": "+ 15 Physical Penetration"
+    }
+  },
+  {
+    "id": 12,
+    "key": "malefic_gun",
+    "name": "Malefic Gun",
+    "tier": 3,
+    "category": "Attack",
+    "price": 2120,
+    "attributes": {
+      "attack_speed": 20,
+      "physical_attack": 40
+    }
+  },
+  {
+    "id": 13,
+    "key": "malefic_roar",
+    "name": "Malefic Roar",
+    "tier": 3,
+    "category": "Attack",
+    "price": 2060,
+    "attributes": {
+      "physical_attack": 60
+    }
+  },
+  {
+    "id": 14,
+    "key": "rose_gold_meteor",
+    "name": "Rose Gold Meteor",
+    "tier": 3,
+    "category": "Attack",
+    "price": 1820,
+    "attributes": {
+      "lifesteal": 10,
+      "attack_speed": 20,
+      "physical_attack": 30
+    }
+  },
+  {
+    "id": 15,
+    "key": "sea_halberd",
+    "name": "Sea Halberd",
+    "tier": 3,
+    "category": "Attack",
+    "price": 2050,
+    "attributes": {
+      "attack_speed": 20,
+      "physical_attack": 80
+    }
+  },
+  {
+    "id": 16,
+    "key": "sky_piercer",
+    "name": "Sky Piercer",
+    "tier": 3,
+    "category": "AttackMagic",
+    "price": 1500,
+    "attributes": {
+      "adaptive_attack": 60,
+      "movement_speed": 15
+    }
+  },
+  {
+    "id": 17,
+    "key": "war_axe",
+    "name": "War Axe",
+    "tier": 3,
+    "category": "Attack",
+    "price": 2100,
+    "attributes": {
+      "hp": 400,
+      "spell_vamp": 8,
+      "physical_attack": 35,
+      "cooldown_reduction": 10
+    }
+  },
+  {
+    "id": 18,
+    "key": "wind_of_nature",
+    "name": "Wind of Nature",
+    "tier": 3,
+    "category": "Attack",
+    "price": 1910,
+    "attributes": {
+      "lifesteal": 10,
+      "attack_speed": 20,
+      "physical_attack": 30
+    }
+  },
+  {
+    "id": 19,
+    "key": "windtalker",
+    "name": "Windtalker",
+    "tier": 3,
+    "category": "Attack",
+    "price": 1880,
+    "attributes": {
+      "attack_speed": 35,
+      "critical_chance": 20,
+      "movement_speed": 20
+    }
+  },
+  {
+    "id": 20,
+    "key": "winter_crown",
+    "name": "Winter Crown",
+    "tier": 3,
+    "category": "AttackMagic",
+    "price": 1910,
+    "attributes": {
+      "hp": 400,
+      "adaptive_attack": 45,
+      "cooldown_reduction": 5
+    }
+  },
+  {
+    "id": 21,
+    "key": "fury_hammer",
+    "name": "Fury Hammer",
+    "tier": 2,
+    "category": "Attack",
+    "price": 830,
+    "attributes": {
+      "physical_attack": 35,
+      "unique_attribute": "+ 12 Physical Penetration"
+    }
+  },
+  {
+    "id": 22,
+    "key": "legion_sword",
+    "name": "Legion Sword",
+    "tier": 2,
+    "category": "Attack",
+    "price": 910,
+    "attributes": {
+      "physical_attack": 60
+    }
+  },
+  {
+    "id": 23,
+    "key": "magic_blade",
+    "name": "Magic Blade",
+    "tier": 2,
+    "category": "Attack",
+    "price": 1050,
+    "attributes": {
+      "lifesteal": 10,
+      "physical_attack": 35
+    }
+  },
+  {
+    "id": 24,
+    "key": "ogre_tomahawk",
+    "name": "Ogre Tomahawk",
+    "tier": 2,
+    "category": "Attack",
+    "price": 650,
+    "attributes": {
+      "hp": 230,
+      "physical_attack": 25
+    }
+  },
+  {
+    "id": 25,
+    "key": "regular_spear",
+    "name": "Regular Spear",
+    "tier": 2,
+    "category": "Attack",
+    "price": 600,
+    "attributes": {
+      "attack_speed": 10,
+      "physical_attack": 20
+    }
+  },
+  {
+    "id": 26,
+    "key": "rogue_meteor",
+    "name": "Rogue Meteor",
+    "tier": 2,
+    "category": "Attack",
+    "price": 900,
+    "attributes": {
+      "attack_speed": 15,
+      "critical_chance": 10
+    }
+  },
+  {
+    "id": 27,
+    "key": "swift_crossbow",
+    "name": "Swift Crossbow",
+    "tier": 2,
+    "category": "Attack",
+    "price": 1000,
+    "attributes": {
+      "attack_speed": 20
+    }
+  },
+  {
+    "id": 28,
+    "key": "dagger",
+    "name": "Dagger",
+    "tier": 1,
+    "category": "Attack",
+    "price": 250,
+    "attributes": {
+      "physical_attack": 15
+    }
+  },
+  {
+    "id": 29,
+    "key": "expert_gloves",
+    "name": "Expert Gloves",
+    "tier": 1,
+    "category": "AttackMagic",
+    "price": 500,
+    "attributes": {
+      "adaptive_attack": 30
+    }
+  },
+  {
+    "id": 30,
+    "key": "iron_hunting_bow",
+    "name": "Iron Hunting Bow",
+    "tier": 1,
+    "category": "Attack",
+    "price": 450,
+    "attributes": {
+      "physical_attack": 10,
+      "cooldown_reduction": 5
+    }
+  },
+  {
+    "id": 31,
+    "key": "javelin",
+    "name": "Javelin",
+    "tier": 1,
+    "category": "Attack",
+    "price": 320,
+    "attributes": {
+      "critical_chance": 8
+    }
+  },
+  {
+    "id": 32,
+    "key": "knife",
+    "name": "Knife",
+    "tier": 1,
+    "category": "Attack",
+    "price": 280,
+    "attributes": {
+      "attack_speed": 10
+    }
+  },
+  {
+    "id": 33,
+    "key": "vampire_mallet",
+    "name": "Vampire Mallet",
+    "tier": 1,
+    "category": "Attack",
+    "price": 400,
+    "attributes": {
+      "lifesteal": 8,
+      "physical_attack": 8
+    }
+  },
+  {
+    "id": 34,
+    "key": "power_potion",
+    "name": "Power Potion",
+    "tier": 0,
+    "category": "Attack",
+    "price": 1500
+  },
+  {
+    "id": 35,
+    "key": "blood_wings",
+    "name": "Blood Wings",
+    "tier": 3,
+    "category": "Magic",
+    "price": 2100,
+    "attributes": {
+      "magic_power": 90
+    }
+  },
+  {
+    "id": 36,
+    "key": "clock_of_destiny",
+    "name": "Clock of Destiny",
+    "tier": 3,
+    "category": "Magic",
+    "price": 2030,
+    "attributes": {
+      "hp": 400,
+      "mana": 400,
+      "magic_power": 45,
+      "cooldown_reduction": 10
+    }
+  },
+  {
+    "id": 37,
+    "key": "concentrated_energy",
+    "name": "Concentrated Energy",
+    "tier": 3,
+    "category": "Magic",
+    "price": 2020,
+    "attributes": {
+      "hp": 400,
+      "magic_power": 70,
+      "unique_attribute": "+ 20% Hybrid Lifesteal"
+    }
+  },
+  {
+    "id": 38,
+    "key": "divine_glaive",
+    "name": "Divine Glaive",
+    "tier": 3,
+    "category": "Magic",
+    "price": 1970,
+    "attributes": {
+      "magic_power": 60,
+      "unique_attribute": "+ 40% Magic Penetration"
+    }
+  },
+  {
+    "id": 39,
+    "key": "enchanted_talisman",
+    "name": "Enchanted Talisman",
+    "tier": 3,
+    "category": "Magic",
+    "price": 1870,
+    "attributes": {
+      "hp": 250,
+      "magic_power": 50,
+      "cooldown_reduction": 20
+    }
+  },
+  {
+    "id": 40,
+    "key": "feather_of_heaven",
+    "name": "Feather of Heaven",
+    "tier": 3,
+    "category": "Magic",
+    "price": 2030,
+    "attributes": {
+      "lifesteal": 10,
+      "attack_speed": 20,
+      "magic_power": 55,
+      "cooldown_reduction": 5
+    }
+  },
+  {
+    "id": 41,
+    "key": "flask_of_the_oasis",
+    "name": "Flask of the Oasis",
+    "tier": 3,
+    "category": "Magic",
+    "price": 1850,
+    "attributes": {
+      "hp": 300,
+      "magic_power": 60,
+      "cooldown_reduction": 10,
+      "unique_attribute": "+ 12% Healing Effect"
+    }
+  },
+  {
+    "id": 42,
+    "key": "genius_wand",
+    "name": "Genius Wand",
+    "tier": 3,
+    "category": "Magic",
+    "price": 2000,
+    "attributes": {
+      "magic_power": 75,
+      "movement_speed": 5,
+      "unique_attribute": "+ 10 Magic Penetration"
+    }
+  },
+  {
+    "id": 43,
+    "key": "glowing_wand",
+    "name": "Glowing Wand",
+    "tier": 3,
+    "category": "Magic",
+    "price": 2150,
+    "attributes": {
+      "hp": 400,
+      "magic_power": 75,
+      "movement_speed": 5
+    }
+  },
+  {
+    "id": 44,
+    "key": "holy_crystal",
+    "name": "Holy Crystal",
+    "tier": 3,
+    "category": "Magic",
+    "price": 3000,
+    "attributes": {
+      "magic_power": 185
+    }
+  },
+  {
+    "id": 45,
+    "key": "ice_queen_wand",
+    "name": "Ice Queen Wand",
+    "tier": 3,
+    "category": "Magic",
+    "price": 2040,
+    "attributes": {
+      "hp": 300,
+      "spell_vamp": 10,
+      "magic_power": 75,
+      "movement_speed": 7
+    }
+  },
+  {
+    "id": 46,
+    "key": "lightning_truncheon",
+    "name": "Lightning Truncheon",
+    "tier": 3,
+    "category": "Magic",
+    "price": 2250,
+    "attributes": {
+      "mana": 400,
+      "magic_power": 75,
+      "cooldown_reduction": 10
+    }
+  },
+  {
+    "id": 47,
+    "key": "starlium_scythe",
+    "name": "Starlium Scythe",
+    "tier": 3,
+    "category": "Magic",
+    "price": 2220,
+    "attributes": {
+      "mana_regen": 6,
+      "hybrid_lifesteal": 8,
+      "magic_power": 70,
+      "cooldown_reduction": 10
+    }
+  },
+  {
+    "id": 48,
+    "key": "wishing_lantern",
+    "name": "Wishing Lantern",
+    "tier": 3,
+    "category": "Magic",
+    "price": 2250,
+    "attributes": {
+      "mana": 400,
+      "magic_power": 75,
+      "cooldown_reduction": 10
+    }
+  },
+  {
+    "id": 49,
+    "key": "azure_blade",
+    "name": "Azure Blade",
+    "tier": 2,
+    "category": "Magic",
+    "price": 600,
+    "attributes": {
+      "mana_regen": 5,
+      "cooldown_reduction": 5
+    }
+  },
+  {
+    "id": 50,
+    "key": "elegant_gem",
+    "name": "Elegant Gem",
+    "tier": 2,
+    "category": "Magic",
+    "price": 700,
+    "attributes": {
+      "hp": 300,
+      "mana": 380
+    }
+  },
+  {
+    "id": 51,
+    "key": "exotic_veil",
+    "name": "Exotic Veil",
+    "tier": 2,
+    "category": "Magic",
+    "price": 600,
+    "attributes": {
+      "magic_power": 30,
+      "movement_speed": 5
+    }
+  },
+  {
+    "id": 52,
+    "key": "mystic_container",
+    "name": "Mystic Container",
+    "tier": 2,
+    "category": "Magic",
+    "price": 500,
+    "attributes": {
+      "spell_vamp": 8,
+      "magic_power": 15
+    }
+  },
+  {
+    "id": 53,
+    "key": "tome_of_evil",
+    "name": "Tome of Evil",
+    "tier": 2,
+    "category": "Magic",
+    "price": 950,
+    "attributes": {
+      "mana_regen": 4,
+      "magic_power": 35,
+      "cooldown_reduction": 8
+    }
+  },
+  {
+    "id": 54,
+    "key": "book_of_sages",
+    "name": "Book of Sages",
+    "tier": 1,
+    "category": "Magic",
+    "price": 450,
+    "attributes": {
+      "magic_power": 8,
+      "cooldown_reduction": 5
+    }
+  },
+  {
+    "id": 55,
+    "key": "magic_necklace",
+    "name": "Magic Necklace",
+    "tier": 1,
+    "category": "Magic",
+    "price": 120,
+    "attributes": {
+      "mana_regen": 2
+    }
+  },
+  {
+    "id": 56,
+    "key": "magic_wand",
+    "name": "Magic Wand",
+    "tier": 1,
+    "category": "Magic",
+    "price": 820,
+    "attributes": {
+      "magic_power": 45
+    }
+  },
+  {
+    "id": 57,
+    "key": "mystery_codex",
+    "name": "Mystery Codex",
+    "tier": 1,
+    "category": "Magic",
+    "price": 300,
+    "attributes": {
+      "magic_power": 15
+    }
+  },
+  {
+    "id": 58,
+    "key": "power_crystal",
+    "name": "Power Crystal",
+    "tier": 1,
+    "category": "Magic",
+    "price": 220,
+    "attributes": {
+      "mana": 280
+    }
+  },
+  {
+    "id": 59,
+    "key": "flower_of_hope",
+    "name": "Flower of Hope",
+    "tier": 0,
+    "category": "Magic",
+    "price": 0,
+    "attributes": {
+      "adaptive_attack": 5
+    }
+  },
+  {
+    "id": 60,
+    "key": "lantern_of_hope",
+    "name": "Lantern of Hope",
+    "tier": 0,
+    "category": "Magic",
+    "price": 0,
+    "attributes": {
+      "magic_power": 20,
+      "cooldown_reduction": 2,
+      "movement_speed": 4
+    }
+  },
+  {
+    "id": 61,
+    "key": "magic_potion",
+    "name": "Magic Potion",
+    "tier": 0,
+    "category": "Magic",
+    "price": 1500
+  },
+  {
+    "id": 62,
+    "key": "antique_cuirass",
+    "name": "Antique Cuirass",
+    "tier": 3,
+    "category": "Defense",
+    "price": 2170,
+    "attributes": {
+      "hp": 920,
+      "hp_regen": 4,
+      "physical_defense": 40
+    }
+  },
+  {
+    "id": 63,
+    "key": "athena_s_shield",
+    "name": "Athena's Shield",
+    "tier": 3,
+    "category": "Defense",
+    "price": 2150,
+    "attributes": {
+      "hp": 900,
+      "hp_regen": 2,
+      "magic_defense": 48
+    }
+  },
+  {
+    "id": 64,
+    "key": "blade_armor",
+    "name": "Blade Armor",
+    "tier": 3,
+    "category": "Defense",
+    "price": 1910,
+    "attributes": {
+      "physical_defense": 70,
+      "unique_attribute": "+ 20% Critical Damage Reduction"
+    }
+  },
+  {
+    "id": 65,
+    "key": "brute_force_breastplate",
+    "name": "Brute Force Breastplate",
+    "tier": 3,
+    "category": "Defense",
+    "price": 1870,
+    "attributes": {
+      "hp": 600,
+      "physical_defense": 20,
+      "cooldown_reduction": 10
+    }
+  },
+  {
+    "id": 66,
+    "key": "chastise_pauldron",
+    "name": "Chastise Pauldron",
+    "tier": 3,
+    "category": "Defense",
+    "price": 2100,
+    "attributes": {
+      "hp": 1800,
+      "physical_defense": 40
+    }
+  },
+  {
+    "id": 67,
+    "key": "cursed_helmet",
+    "name": "Cursed Helmet",
+    "tier": 3,
+    "category": "Defense",
+    "price": 1910,
+    "attributes": {
+      "hp": 1200,
+      "magic_defense": 20
+    }
+  },
+  {
+    "id": 68,
+    "key": "dominance_ice",
+    "name": "Dominance Ice",
+    "tier": 3,
+    "category": "Defense",
+    "price": 2010,
+    "attributes": {
+      "mana": 500,
+      "physical_defense": 55,
+      "movement_speed": 5
+    }
+  },
+  {
+    "id": 69,
+    "key": "guardian_helmet",
+    "name": "Guardian Helmet",
+    "tier": 3,
+    "category": "Defense",
+    "price": 2200,
+    "attributes": {
+      "hp": 1550,
+      "hp_regen": 20
+    }
+  },
+  {
+    "id": 70,
+    "key": "immortality",
+    "name": "Immortality",
+    "tier": 3,
+    "category": "Defense",
+    "price": 2120,
+    "attributes": {
+      "hp": 800,
+      "physical_defense": 15
+    }
+  },
+  {
+    "id": 71,
+    "key": "oracle",
+    "name": "Oracle",
+    "tier": 3,
+    "category": "Defense",
+    "price": 1860,
+    "attributes": {
+      "hp": 850,
+      "physical_defense": 20,
+      "magic_defense": 20,
+      "cooldown_reduction": 10
+    }
+  },
+  {
+    "id": 72,
+    "key": "queen_s_wings",
+    "name": "Queen's Wings",
+    "tier": 3,
+    "category": "Defense",
+    "price": 2250,
+    "attributes": {
+      "hp": 600,
+      "spell_vamp": 10,
+      "adaptive_attack": 40,
+      "cooldown_reduction": 10
+    }
+  },
+  {
+    "id": 73,
+    "key": "radiant_armor",
+    "name": "Radiant Armor",
+    "tier": 3,
+    "category": "Defense",
+    "price": 1880,
+    "attributes": {
+      "hp": 950,
+      "hp_regen": 12,
+      "magic_defense": 40
+    }
+  },
+  {
+    "id": 74,
+    "key": "thunder_belt",
+    "name": "Thunder Belt",
+    "tier": 3,
+    "category": "Defense",
+    "price": 1820,
+    "attributes": {
+      "hp": 800,
+      "physical_defense": 15,
+      "magic_defense": 15,
+      "movement_speed": 20
+    }
+  },
+  {
+    "id": 75,
+    "key": "ares_belt",
+    "name": "Ares Belt",
+    "tier": 2,
+    "category": "Defense",
+    "price": 900,
+    "attributes": {
+      "hp": 770
+    }
+  },
+  {
+    "id": 76,
+    "key": "black_ice_shield",
+    "name": "Black Ice Shield",
+    "tier": 2,
+    "category": "Defense",
+    "price": 880,
+    "attributes": {
+      "mana": 400,
+      "physical_defense": 18
+    }
+  },
+  {
+    "id": 77,
+    "key": "dreadnaught_armor",
+    "name": "Dreadnaught Armor",
+    "tier": 2,
+    "category": "Defense",
+    "price": 730,
+    "attributes": {
+      "physical_defense": 30
+    }
+  },
+  {
+    "id": 78,
+    "key": "molten_essence",
+    "name": "Molten Essence",
+    "tier": 2,
+    "category": "Defense",
+    "price": 800,
+    "attributes": {
+      "hp": 540
+    }
+  },
+  {
+    "id": 79,
+    "key": "silence_robe",
+    "name": "Silence Robe",
+    "tier": 2,
+    "category": "Defense",
+    "price": 1020,
+    "attributes": {
+      "hp": 540,
+      "magic_defense": 23
+    }
+  },
+  {
+    "id": 80,
+    "key": "steel_legplates",
+    "name": "Steel Legplates",
+    "tier": 2,
+    "category": "Defense",
+    "price": 630,
+    "attributes": {
+      "physical_defense": 35
+    }
+  },
+  {
+    "id": 81,
+    "key": "healing_necklace",
+    "name": "Healing Necklace",
+    "tier": 1,
+    "category": "Defense",
+    "price": 140,
+    "attributes": {
+      "hp_regen": 4
+    }
+  },
+  {
+    "id": 82,
+    "key": "hero_s_ring",
+    "name": "Hero's Ring",
+    "tier": 1,
+    "category": "Defense",
+    "price": 450,
+    "attributes": {
+      "hp": 150,
+      "cooldown_reduction": 5
+    }
+  },
+  {
+    "id": 83,
+    "key": "leather_jerkin",
+    "name": "Leather Jerkin",
+    "tier": 1,
+    "category": "Defense",
+    "price": 220,
+    "attributes": {
+      "physical_defense": 14
+    }
+  },
+  {
+    "id": 84,
+    "key": "magic_resist_cloak",
+    "name": "Magic Resist Cloak",
+    "tier": 1,
+    "category": "Defense",
+    "price": 220,
+    "attributes": {
+      "magic_defense": 14
+    }
+  },
+  {
+    "id": 85,
+    "key": "vitality_crystal",
+    "name": "Vitality Crystal",
+    "tier": 1,
+    "category": "Defense",
+    "price": 300,
+    "attributes": {
+      "hp": 230
+    }
+  },
+  {
+    "id": 86,
+    "key": "rock_potion",
+    "name": "Rock Potion",
+    "tier": 0,
+    "category": "Defense",
+    "price": 1500
+  },
+  {
+    "id": 87,
+    "key": "arcane_boots",
+    "name": "Arcane Boots",
+    "tier": 3,
+    "category": "Movement",
+    "price": 690,
+    "attributes": {
+      "magic_penetration": 10,
+      "movement_speed": 40
+    }
+  },
+  {
+    "id": 88,
+    "key": "demon_boots",
+    "name": "Demon Boots",
+    "tier": 3,
+    "category": "Movement",
+    "price": 720,
+    "attributes": {
+      "mana_regen": 10,
+      "movement_speed": 40
+    }
+  },
+  {
+    "id": 89,
+    "key": "magic_shoes",
+    "name": "Magic Boots",
+    "tier": 3,
+    "category": "Movement",
+    "price": 710,
+    "attributes": {
+      "cooldown_reduction": 10,
+      "movement_speed": 40
+    }
+  },
+  {
+    "id": 90,
+    "key": "rapid_boots",
+    "name": "Rapid Boots",
+    "tier": 3,
+    "category": "Movement",
+    "price": 750,
+    "attributes": {
+      "movement_speed": 65,
+      "slow_reduction": 35
+    }
+  },
+  {
+    "id": 91,
+    "key": "swift_boots",
+    "name": "Swift Boots",
+    "tier": 3,
+    "category": "Movement",
+    "price": 710,
+    "attributes": {
+      "attack_speed": 15,
+      "movement_speed": 40
+    }
+  },
+  {
+    "id": 92,
+    "key": "tough_boots",
+    "name": "Tough Boots",
+    "tier": 3,
+    "category": "Movement",
+    "price": 700,
+    "attributes": {
+      "magic_defense": 18,
+      "movement_speed": 40
+    }
+  },
+  {
+    "id": 93,
+    "key": "warrior_boots",
+    "name": "Warrior Boots",
+    "tier": 3,
+    "category": "Movement",
+    "price": 720,
+    "attributes": {
+      "physical_defense": 18,
+      "movement_speed": 40
+    }
+  },
+  {
+    "id": 94,
+    "key": "boots",
+    "name": "Boots",
+    "tier": 1,
+    "category": "Movement",
+    "price": 250,
+    "attributes": {
+      "movement_speed": 20
+    }
+  },
+  {
+    "id": 95,
+    "key": "allow_throw",
+    "name": "Allow Throw",
+    "tier": 0,
+    "category": "Movement",
+    "price": 0
+  },
+  {
+    "id": 96,
+    "key": "broken_heart",
+    "name": "Broken Heart",
+    "tier": 0,
+    "category": "Movement",
+    "price": 0
+  },
+  {
+    "id": 97,
+    "key": "throw_forbidden",
+    "name": "Throw Forbidden",
+    "tier": 0,
+    "category": "Movement",
+    "price": 0
+  },
+  {
+    "id": 98,
+    "key": "bloody_retribution",
+    "name": "Bloody Retribution",
+    "tier": 0,
+    "category": "Jungling",
+    "price": 0
+  },
+  {
+    "id": 99,
+    "key": "flame_retribution",
+    "name": "Flame Retribution",
+    "tier": 0,
+    "category": "Jungling",
+    "price": 0
+  },
+  {
+    "id": 100,
+    "key": "ice_retribution",
+    "name": "Ice Retribution",
+    "tier": 0,
+    "category": "Jungling",
+    "price": 0
+  },
+  {
+    "id": 101,
+    "key": "conceal",
+    "name": "Conceal",
+    "tier": 0,
+    "category": "Roaming",
+    "price": 0
+  },
+  {
+    "id": 102,
+    "key": "dire_hit",
+    "name": "Dire Hit",
+    "tier": 0,
+    "category": "Roaming",
+    "price": 0
+  },
+  {
+    "id": 103,
+    "key": "encourage",
+    "name": "Encourage",
+    "tier": 0,
+    "category": "Roaming",
+    "price": 0
+  },
+  {
+    "id": 104,
+    "key": "favor",
+    "name": "Favor",
+    "tier": 0,
+    "category": "Roaming",
+    "price": 0
+  }
+]

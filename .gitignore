@@ -34,7 +34,7 @@ Thumbs.db
 *.avi
 
 # ── Generated assets ──
-assets/databases/*.json
+# assets/databases/*.json
 
 # ── Trained Models ──
 runs/
@@ -46,3 +46,5 @@ yolo11n.pt
 .claude
 .tmp
 data/*
+/trainings/hero_skills/*
+/trainings/cd_number/real_dataset/*

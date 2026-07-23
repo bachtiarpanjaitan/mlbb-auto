@@ -1,0 +1,264 @@
+[
+  {
+    "id": 1,
+    "key": "recall",
+    "name": "Recall",
+    "description": "Teleport to altar after 6 seconds. Taking damage cancels the effect.",
+    "image_file": "Recall.png"
+  },
+  {
+    "id": 2,
+    "key": "healing",
+    "name": "Healing",
+    "description": "TBA",
+    "image_file": "Healing.png"
+  },
+  {
+    "id": 3,
+    "key": "execute",
+    "name": "Execute",
+    "description": "Deals 100(+10 × Hero Level)(+enemy's 13% Lost HP)True Damageto the designated enemy hero.This damageignores shield. If the target is slain by this skill, itscooldown will be reducedby 40%.",
+    "image_file": "Execute.png",
+    "cooldown": 90,
+    "level_scaling": {
+      "base_damage": [
+        110.0,
+        120.0,
+        130.0,
+        140.0,
+        150.0,
+        160.0,
+        170.0,
+        180.0,
+        190.0,
+        200.0,
+        210.0,
+        220.0,
+        230.0,
+        240.0,
+        250.0
+      ]
+    }
+  },
+  {
+    "id": 4,
+    "key": "retribution",
+    "name": "Retribution",
+    "description": "Deals 520(+80 × Hero Level)True Damageto creeps and minions.Passive:Creep rewards are increasedby 60%, and damage taken from creeps is reduced by 50%.Minion rewards are reducedby 70% for the first 5 minutes.Blessing: Reach 5 creep kills, hero kills, or hero kill assists to level up this skill (the skill decided by the Blessing of the Jungling Footwear purchased). Reaching 15 increasesPhysical AttackandMagic Powerby 15.Flame: Dealing100 True Damageand absorbing 35-70Physical AttackandMagic Powerf",
+    "image_file": "Retribution.png",
+    "cooldown": 35,
+    "level_scaling": {
+      "base_damage": [
+        600.0,
+        680.0,
+        760.0,
+        840.0,
+        920.0,
+        1000.0,
+        1080.0,
+        1160.0,
+        1240.0,
+        1320.0,
+        1400.0,
+        1480.0,
+        1560.0,
+        1640.0,
+        1720.0
+      ]
+    }
+  },
+  {
+    "id": 5,
+    "key": "inspire",
+    "name": "Inspire",
+    "description": "For up to 6Basic Attackswithin the next 5 seconds, increase Attack Speed to 1.5 times and the Attack Speed cap to 500%.The Basic Attacks also ignore 8(+1*Hero Level) of target'sHybrid Defenseand restore 60(+15% Total Physical Attack)(+10% Total Magic Power)HPon hit.",
+    "image_file": "Inspire.png",
+    "cooldown": 75
+  },
+  {
+    "id": 6,
+    "key": "sprint",
+    "name": "Sprint",
+    "description": "Gains up to 50% extraMovement Speedandslow immunityfor 6s. Theextra Movement Speedgradually decays after 2s.",
+    "image_file": "Sprint.png",
+    "cooldown": 100
+  },
+  {
+    "id": 7,
+    "key": "revitalize",
+    "name": "Revitalize",
+    "description": "Summons a Healing Spring thatrestores2.5%Max HPevery 0.5 second for 5 seconds (maximum of25% Max HP).Increases theShieldandHP Regenby 25% for allies within the area of effect (this effect is cannot be stacked up).",
+    "image_file": "Revitalize.png",
+    "cooldown": 100
+  },
+  {
+    "id": 8,
+    "key": "aegis",
+    "name": "Aegis",
+    "description": "Immediately gains ashieldthat absorbs 750(+50 × Hero Level)shielddamage for 5 seconds.Thenearby ally with the lowest HPalso gains 525(+35 × Hero Level)(+70% Lost HP)shield.",
+    "image_file": "Aegis.png",
+    "cooldown": 75,
+    "level_scaling": {
+      "shield": [
+        800.0,
+        850.0,
+        900.0,
+        950.0,
+        1000.0,
+        1050.0,
+        1100.0,
+        1150.0,
+        1200.0,
+        1250.0,
+        1300.0,
+        1350.0,
+        1400.0,
+        1450.0,
+        1500.0
+      ],
+      "shield_nearby_allies": [
+        560.0,
+        595.0,
+        630.0,
+        665.0,
+        700.0,
+        735.0,
+        770.0,
+        805.0,
+        840.0,
+        875.0,
+        910.0,
+        945.0,
+        980.0,
+        1015.0,
+        1050.0
+      ]
+    }
+  },
+  {
+    "id": 9,
+    "key": "petrify",
+    "name": "Petrify",
+    "description": "Deals 100(+15 × Hero Level)Magic Damageto nearby enemies andpetrifiesthem for 0.8s. Enemies hit will also be slowed by 50% for 0.8s afterward.",
+    "image_file": "Petrify.png",
+    "cooldown": 75
+  },
+  {
+    "id": 10,
+    "key": "purify",
+    "name": "Purify",
+    "description": "Immediately removes all negative effects.In the next 1.2 seconds, gainscontrol immunityand 15%Movement Speed.",
+    "image_file": "Purify.png",
+    "cooldown": 90
+  },
+  {
+    "id": 11,
+    "key": "flameshot",
+    "name": "Flameshot",
+    "description": "Fires a Flaming Shot in a designated direction, dealing 160(+60% Total Magic Power)–640+180% Total Magic Power)Magic Damage(scales on distance) andslowingthe target by 30% for 0.5 second.Casting the skillknocks backnearby enemies.",
+    "image_file": "Flameshot.png",
+    "cooldown": 50
+  },
+  {
+    "id": 12,
+    "key": "flicker",
+    "name": "Flicker",
+    "description": "Movesa certain distance in a designated direction. Then gains 6(+1 × Hero Level)PhysicalandMagicDefense for 1 second.",
+    "image_file": "Flicker.png",
+    "cooldown": 120,
+    "level_scaling": {
+      "extra_hybrid_defense": [
+        6.0,
+        7.0,
+        8.0,
+        9.0,
+        10.0,
+        11.0,
+        12.0,
+        13.0,
+        14.0,
+        15.0,
+        16.0,
+        17.0,
+        18.0,
+        19.0,
+        20.0
+      ]
+    }
+  },
+  {
+    "id": 13,
+    "key": "arrival",
+    "name": "Arrival",
+    "description": "Teleports to an allied turret (including destroyed turrets), base, or minion after channeling for 3 seconds, gaining 60%movement speedthat will decay in 3 seconds. If the channeling is cancelled or interrupted, thecooldown will be reducedby 30 seconds.",
+    "image_file": "Arrival.png",
+    "cooldown": 75
+  },
+  {
+    "id": 14,
+    "key": "vengeance",
+    "name": "Vengeance",
+    "description": "In the next 3 seconds, each time the hero takes damage deals 40% of the damage taken asMagic Damageto the enemy.Gains 35%Damage Reductionduring the period.",
+    "image_file": "Vengeance.png",
+    "cooldown": 75
+  },
+  {
+    "id": 15,
+    "key": "healing_spell",
+    "name": "Healing Spell",
+    "description": "Restores 14% of HeroMax HPand 10% of HeroMax Mana, and surrounding allied heroes for up to 12% of theirMax HP(depending on the number of nearby allied heroes) and 10% of theirMax Mana.Restores additional 165(+15 × Hero Level)HPto most injured allied Heroes (including themselves).",
+    "image_file": "Healing_Spell.png",
+    "cooldown": 110,
+    "level_scaling": {
+      "additional_hp": [
+        180.0,
+        195.0,
+        210.0,
+        225.0,
+        240.0,
+        255.0,
+        270.0,
+        285.0,
+        300.0,
+        315.0,
+        330.0,
+        345.0,
+        360.0,
+        375.0,
+        390.0
+      ]
+    }
+  },
+  {
+    "id": 16,
+    "key": "interference",
+    "name": "Interference",
+    "description": "Silencesdefensive turrets for 5 seconds and lowers theirdefenseby 10.",
+    "image_file": "Interference.png",
+    "cooldown": 120
+  },
+  {
+    "id": 17,
+    "key": "weaken",
+    "name": "Weaken",
+    "description": "Reduces the target hero'smovement speedby 70% andPhysical AttackandMagic Powerby 50% for 3 seconds.",
+    "image_file": "Weaken.png",
+    "cooldown": 60
+  },
+  {
+    "id": 18,
+    "key": "track",
+    "name": "Track",
+    "description": "Summons Harper to search for nearest enemy hero. ReducesrevealedHeroMovement Speedby 70%,PhysicalandMagical Attackby 50% for 3 seconds.",
+    "image_file": "Track.png",
+    "cooldown": 100
+  },
+  {
+    "id": 19,
+    "key": "iron_wall",
+    "name": "Iron Wall",
+    "description": "In 3 seconds,PhysicalandMagic Damagetaken is reduced by 40%.",
+    "image_file": "Iron_Wall.png",
+    "cooldown": 60
+  }
+]

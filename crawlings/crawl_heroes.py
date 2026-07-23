@@ -603,6 +603,16 @@ def main():
         # Skills
         skill_objects = {}
         for slug, skill_data in detail["skills"]:
+            # Tambah unlock_level
+            if slug in ("skill_1", "passive", "special_skill", "battle_spell"):
+                skill_data["unlock_level"] = 1
+            elif slug == "skill_2":
+                skill_data["unlock_level"] = 2
+            elif slug == "ultimate":
+                cd_levels = skill_data.get("levels", {}).get("cooldown", [])
+                skill_data["unlock_level"] = 4 if len(cd_levels) in (0, 3) else 1
+            else:
+                skill_data["unlock_level"] = 1
             skill_objects[slug] = skill_data
 
         if skill_objects:
