@@ -2,7 +2,7 @@ task: detect
 mode: train
 model: yolo11n.pt
 data: trainings/hero_detector/data.yaml
-epochs: 100
+epochs: 5
 time: null
 patience: 25
 batch: 16
@@ -12,7 +12,7 @@ save_period: -1
 cache: false
 device: mps
 workers: 4
-project: trainings/hero_detector
+project: /Users/bachtiarpanjaitan/Projects/personal/mlbb-auto/trainings/hero_detector
 name: yolo11n_minimap
 exist_ok: true
 pretrained: true
@@ -112,4 +112,4 @@ auto_augment: randaugment
 erasing: 0.4
 cfg: null
 tracker: tracktrack.yaml
-save_dir: trainings/hero_detector/yolo11n_minimap
+save_dir: /Users/bachtiarpanjaitan/Projects/personal/mlbb-auto/trainings/hero_detector/yolo11n_minimap

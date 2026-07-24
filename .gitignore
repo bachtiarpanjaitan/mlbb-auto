@@ -49,3 +49,4 @@ data/*
 /trainings/hero_skills/*
 /trainings/cd_number/real_dataset/*
 /trainings/cd_number/cache/*
+/trainings/hero_detector/*

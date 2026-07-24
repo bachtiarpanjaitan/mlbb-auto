@@ -57,7 +57,7 @@ def main():
 
     results = model.train(
         data="trainings/hero_detector/data.yaml",
-        epochs=100,
+        epochs=5,
         imgsz=352,             # Closer to original minimap crop size (350x340)
         batch=16,
         lr0=0.005,
