@@ -53,6 +53,12 @@ image = base.copy()
 current_points: list[tuple[int,int]] = []   # koordinat skala ASLI
 regions: list[dict] = []
 selected_idx: int | None = None   # index polygon yang di-hover untuk dihapus
+selected_vertex: int | None = None  # index vertex yang di-hover (untuk drag)
+drag_state: str | None = None     # "vertex" | "polygon" | None
+drag_target: int = -1             # index region yang di-drag
+drag_vertex: int = -1             # index vertex yang di-drag
+drag_start_mouse: tuple[int,int] = (0, 0)  # posisi mouse awal (display coords)
+drag_start_points: list = []      # snapshot titik awal region saat drag mulai
 
 # Load existing JSON if available
 if OUTPUT_JSON.exists():
@@ -74,6 +80,43 @@ def point_in_polygon(pt: tuple[int,int], poly: list) -> bool:
     return result >= 0
 
 
+def find_nearest_vertex(pt: tuple[int,int], poly: list, radius: int = 15) -> int | None:
+    """Cari vertex terdekat dalam radius (skala DISPLAY)."""
+    for i, p in enumerate(poly):
+        dx = abs(p[0] * SCALE - pt[0])
+        dy = abs(p[1] * SCALE - pt[1])
+        if dx <= radius and dy <= radius:
+            return i
+    return None
+
+
+def find_nearest_edge(pt: tuple[int,int], poly: list, radius_sq: int = 400) -> int | None:
+    """Cari segmen garis terdekat — return index vertex SEBELUM segmen (skala DISPLAY).
+    
+    radius_sq = 400 → jarak maks 20px dari garis.
+    """
+    n = len(poly)
+    if n < 2:
+        return None
+    best_idx = None
+    best_dist = float("inf")
+    for i in range(n):
+        j = (i + 1) % n  # next vertex (wrap around)
+        ax, ay = poly[i][0] * SCALE, poly[i][1] * SCALE
+        bx, by = poly[j][0] * SCALE, poly[j][1] * SCALE
+        # Distance from point pt to line segment ab
+        abx, aby = bx - ax, by - ay
+        t = ((pt[0] - ax) * abx + (pt[1] - ay) * aby) / (abx * abx + aby * aby + 1e-10)
+        t = max(0, min(1, t))
+        cx, cy = ax + t * abx, ay + t * aby
+        dx, dy = pt[0] - cx, pt[1] - cy
+        d_sq = dx * dx + dy * dy
+        if d_sq < radius_sq and d_sq < best_dist:
+            best_dist = d_sq
+            best_idx = i
+    return best_idx
+
+
 # -----------------------------
 # Draw
 # -----------------------------
@@ -93,10 +136,48 @@ def redraw():
         # Fill semi-transparan
         cv2.fillPoly(overlay, [arr], color)
 
-        # Border & titik
+        # Border
         cv2.polylines(image, [arr], True, color, 2)
-        for p in pts:
-            cv2.circle(image, tuple(p), 4, color, -1)
+        
+        # Titik vertex — highlight yang sedang di-drag/hover
+        for vi, p in enumerate(pts):
+            is_dragging = (drag_state == "vertex" and drag_target == i and drag_vertex == vi)
+            is_hover = (selected_idx == i and selected_vertex == vi)
+            if is_dragging:
+                cv2.circle(image, tuple(p), 8, (0, 255, 255), -1)  # kuning terang
+            elif is_hover:
+                cv2.circle(image, tuple(p), 7, (255, 255, 255), 2)  # putih outline
+            else:
+                cv2.circle(image, tuple(p), 5, color, -1)
+
+        # Highlight polygon saat di-drag
+        if drag_state == "polygon" and drag_target == i:
+            cv2.polylines(image, [arr], True, (0, 255, 255), 3)
+
+        # Highlight edge yang di-hover (untuk insert titik)
+        if selected_idx == i and selected_vertex is None and not drag_state:
+            pass  # handled globally below
+
+    # --- Global edge hover indicator (for insert point preview) ---
+    if selected_idx is not None and selected_vertex is None and not drag_state:
+        hover_pts = regions[selected_idx]["points"]
+        ei = find_nearest_edge((selected_mx, selected_my), hover_pts)
+        if ei is not None:
+            j = (ei + 1) % len(hover_pts)
+            ax, ay = hover_pts[ei][0] * SCALE, hover_pts[ei][1] * SCALE
+            bx, by = hover_pts[j][0] * SCALE, hover_pts[j][1] * SCALE
+            abx, aby = bx - ax, by - ay
+            t = ((selected_mx - ax) * abx + (selected_my - ay) * aby) / (abx * abx + aby * aby + 1e-10)
+            t = max(0, min(1, t))
+            cx, cy = int(ax + t * abx), int(ay + t * aby)
+            # Highlight the edge
+            cv2.line(image, (ax, ay), (bx, by), (0, 255, 255), 3, cv2.LINE_AA)
+            # Show insert point
+            cv2.circle(image, (cx, cy), 8, (0, 255, 0), -1)
+            cv2.circle(image, (cx, cy), 12, (255, 255, 255), 2)
+            # Label
+            cv2.putText(image, "Klik untuk tambah titik", (cx + 14, cy + 4),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2, cv2.LINE_AA)
 
         # Label nama di tengah polygon (centroid)
         M = cv2.moments(arr)
@@ -131,7 +212,7 @@ def redraw():
 
     # --- Shortcut keys overlay ---
     shortcuts = [
-        "Left Click  : Tambah titik",
+        "Left Click  : Tambah titik / Drag vertex/polygon",
         "Right Click : Tutup polygon",
         "Z           : Undo titik",
         "C           : Clear polygon",
@@ -169,27 +250,149 @@ def redraw():
 # -----------------------------
 # Mouse Callback
 # -----------------------------
+selected_mx: int = 0
+selected_my: int = 0
 def mouse(event, x, y, flags, param):
-    global current_points, selected_idx
+    global current_points, selected_idx, selected_vertex
+    global drag_state, drag_target, drag_vertex, drag_start_mouse, drag_start_points
 
-    if event == cv2.EVENT_MOUSEMOVE:
-        # Highlight polygon yang sedang di-hover (untuk petunjuk delete)
-        # konversi ke skala asli untuk hit-test
-        ox, oy = x // SCALE, y // SCALE
-        new_sel = None
+    # Convert display coords to original
+    ox, oy = x // SCALE, y // SCALE
+
+    if event == cv2.EVENT_LBUTTONDOWN:
+        if current_points:
+            # Sedang membuat polygon baru → tambah titik
+            current_points.append((ox, oy))
+            redraw()
+            return
+
+        # Cek apakah klik di vertex yang sudah ada (mulai drag vertex)
+        found_vertex = False
+        for i, region in enumerate(regions):
+            vi = find_nearest_vertex((x, y), region["points"])
+            if vi is not None:
+                drag_state = "vertex"
+                drag_target = i
+                drag_vertex = vi
+                drag_start_mouse = (x, y)
+                drag_start_points = [list(region["points"][vi])]
+                selected_idx = i
+                selected_vertex = vi
+                found_vertex = True
+                redraw()
+                print(f"[DRAG] Vertex {vi} region '{region['name']}'")
+                break
+
+        if found_vertex:
+            return
+
+        # Cek apakah klik di EDGE polygon → insert titik baru
+        edge_target = None
+        edge_idx = None
+        for i, region in enumerate(regions):
+            ei = find_nearest_edge((x, y), region["points"])
+            if ei is not None:
+                edge_target = i
+                edge_idx = ei
+                break
+
+        if edge_target is not None:
+            # Insert new vertex after edge_idx
+            region = regions[edge_target]
+            j = (edge_idx + 1) % len(region["points"])
+            # Interpolate position on the edge
+            ax, ay = region["points"][edge_idx]
+            bx, by = region["points"][j]
+            abx, aby = bx * SCALE - ax * SCALE, by * SCALE - ay * SCALE
+            t = ((x - ax * SCALE) * abx + (y - ay * SCALE) * aby) / (abx * abx + aby * aby + 1e-10)
+            t = max(0.3, min(0.7, t))  # constrain to middle portion
+            new_px = int(ax + t * (bx - ax))
+            new_py = int(ay + t * (by - ay))
+            region["points"].insert(j, [new_px, new_py])
+            selected_idx = edge_target
+            selected_vertex = j
+            redraw()
+            print(f"[INSERT] Titik baru di region '{region['name']}' (now {len(region['points'])} pts)")
+            return
+
+        # Cek apakah klik di dalam polygon → drag seluruh polygon
         for i, region in enumerate(regions):
             if point_in_polygon((ox, oy), region["points"]):
-                new_sel = i
-                break
-        if new_sel != selected_idx:
-            selected_idx = new_sel
-            redraw()
+                drag_state = "polygon"
+                drag_target = i
+                drag_start_mouse = (x, y)
+                drag_start_points = [list(p) for p in region["points"]]
+                selected_idx = i
+                selected_vertex = None
+                redraw()
+                print(f"[DRAG] Polygon '{region['name']}'")
+                return
 
-    elif event == cv2.EVENT_LBUTTONDOWN:
-        # Simpan koordinat dalam skala ASLI
-        ox, oy = x // SCALE, y // SCALE
+        # Klik di luar → mulai titik baru
         current_points.append((ox, oy))
         redraw()
+
+    elif event == cv2.EVENT_MOUSEMOVE:
+        # Track mouse for edge hover indicator
+        global selected_mx, selected_my
+        selected_mx, selected_my = x, y
+
+        if drag_state == "vertex":
+            # Drag vertex — delta dari posisi mouse awal
+            dmx, dmy = drag_start_mouse
+            dx = (x - dmx) // SCALE
+            dy = (y - dmy) // SCALE
+            region = regions[drag_target]
+            orig_x, orig_y = drag_start_points[0]
+            region["points"][drag_vertex] = [
+                max(0, orig_x + dx),
+                max(0, orig_y + dy)
+            ]
+            redraw()
+        elif drag_state == "polygon":
+            # Drag seluruh polygon — delta dari posisi mouse awal
+            dmx, dmy = drag_start_mouse
+            dx = (x - dmx) // SCALE
+            dy = (y - dmy) // SCALE
+            region = regions[drag_target]
+            for vi in range(len(region["points"])):
+                orig_x, orig_y = drag_start_points[vi]
+                region["points"][vi] = [
+                    max(0, orig_x + dx),
+                    max(0, orig_y + dy)
+                ]
+            redraw()
+        else:
+            # Hover highlight
+            new_sel = None
+            new_vtx = None
+            # Cek vertex dulu
+            for i, region in enumerate(regions):
+                vi = find_nearest_vertex((x, y), region["points"])
+                if vi is not None:
+                    new_sel = i
+                    new_vtx = vi
+                    break
+            if new_vtx is None:
+                # Cek polygon body
+                for i, region in enumerate(regions):
+                    if point_in_polygon((ox, oy), region["points"]):
+                        new_sel = i
+                        break
+            if new_sel != selected_idx or new_vtx != selected_vertex:
+                selected_idx = new_sel
+                selected_vertex = new_vtx
+                redraw()
+
+    elif event == cv2.EVENT_LBUTTONUP:
+        if drag_state:
+            action = "vertex" if drag_state == "vertex" else "polygon"
+            print(f"[DRAG] {action} selesai")
+            drag_state = None
+            drag_target = -1
+            drag_vertex = -1
+            drag_start_points = []
+            redraw()
 
     elif event == cv2.EVENT_RBUTTONDOWN:
         # Tutup polygon aktif → minta nama
@@ -284,7 +487,14 @@ while True:
     # S → simpan polygon aktif + prompt nama → simpan ke JSON
     elif key == ord('s'):
         if not current_points:
-            print("[SAVE] Tidak ada polygon aktif untuk disimpan. Buat polygon dulu (left-click).")
+            # Save existing regions (after drag edits) tanpa prompt nama
+            if not regions:
+                print("[SAVE] Tidak ada region untuk disimpan.")
+                continue
+            OUTPUT_JSON.parent.mkdir(parents=True, exist_ok=True)
+            with open(OUTPUT_JSON, "w") as f:
+                json.dump(regions, f, indent=4)
+            print(f"[SAVE] {len(regions)} region(s) disimpan ke {OUTPUT_JSON}")
             continue
 
         if len(current_points) < 3:

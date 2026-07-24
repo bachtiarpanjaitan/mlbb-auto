@@ -81,6 +81,26 @@ REGION_COLORS = {
     "enemy_blue_buff":    (180,  60, 180, 0.30),
     "bottom_pit_lord":    ( 60, 160, 255, 0.35),  # gold
     "top_pit_lord":       ( 60, 160, 255, 0.35),
+    # Blue towers (cyan)
+    "blue_tower_top_outer": (200, 200,  50, 0.40),
+    "blue_tower_top_inner": (200, 200,  50, 0.40),
+    "blue_tower_top_base":  (200, 200,  50, 0.40),
+    "blue_tower_mid_outer": (200, 200,  50, 0.40),
+    "blue_tower_mid_inner": (200, 200,  50, 0.40),
+    "blue_tower_mid_base":  (200, 200,  50, 0.40),
+    "blue_tower_bot_outer": (200, 200,  50, 0.40),
+    "blue_tower_bot_inner": (200, 200,  50, 0.40),
+    "blue_tower_bot_base":  (200, 200,  50, 0.40),
+    # Red towers (red)
+    "red_tower_top_base":   ( 60,  60, 200, 0.40),
+    "red_tower_top_inner":  ( 60,  60, 200, 0.40),
+    "red_tower_top_outer":  ( 60,  60, 200, 0.40),
+    "red_tower_mid_base":   ( 60,  60, 200, 0.40),
+    "red_tower_mid_inner":  ( 60,  60, 200, 0.40),
+    "red_tower_mid_outer":  ( 60,  60, 200, 0.40),
+    "red_tower_bot_base":   ( 60,  60, 200, 0.40),
+    "red_tower_bot_inner":  ( 60,  60, 200, 0.40),
+    "red_tower_bot_outer":  ( 60,  60, 200, 0.40),
 }
 
 # Fallback for any unnamed region
