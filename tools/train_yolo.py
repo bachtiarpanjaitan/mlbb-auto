@@ -55,10 +55,15 @@ def main():
 
     project_dir = Path("trainings/hero_detector").resolve()
 
+    print(f"   Classes: 11 (blue_hero, red_hero, lord, thunder_fenrir, molten_fiend, lithowanderer, crab, lava_golem, fire_beetle, horned_lizard)")
+
+    # Layer settings:
+    #   freeze=N  — freeze first N layers, only train the rest
+    #   tanpa freeze — train semua layer (default, recommended untuk dataset 2000+ img)
     results = model.train(
         data="trainings/hero_detector/data.yaml",
-        epochs=5,
-        imgsz=352,             # Closer to original minimap crop size (350x340)
+        epochs=20,
+        imgsz=352,
         batch=16,
         lr0=0.005,
         lrf=0.01,
@@ -71,7 +76,8 @@ def main():
         project=str(project_dir),
         name="yolo11n_minimap",
         exist_ok=True,
-        workers=4,
+        workers=16,
+        freeze=10
     )
 
     # Export ONNX

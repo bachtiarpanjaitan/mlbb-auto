@@ -2,7 +2,7 @@ task: detect
 mode: train
 model: yolo11n.pt
 data: trainings/hero_detector/data.yaml
-epochs: 5
+epochs: 20
 time: null
 patience: 25
 batch: 16
@@ -11,7 +11,7 @@ save: true
 save_period: -1
 cache: false
 device: mps
-workers: 4
+workers: 16
 project: /Users/bachtiarpanjaitan/Projects/personal/mlbb-auto/trainings/hero_detector
 name: yolo11n_minimap
 exist_ok: true
@@ -29,7 +29,7 @@ resume: false
 amp: true
 fraction: 1.0
 profile: false
-freeze: null
+freeze: 10
 multi_scale: 0.0
 compile: false
 overlap_mask: true
