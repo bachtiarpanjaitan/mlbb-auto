@@ -60,9 +60,22 @@ def main():
     # Layer settings:
     #   freeze=N  — freeze first N layers, only train the rest
     #   tanpa freeze — train semua layer (default, recommended untuk dataset 2000+ img)
+    # ── Interactive epoch prompt (wajib diisi) ──
+    epochs = 0
+    while epochs < 1:
+        try:
+            inp = input("⏱️  Masukkan jumlah epoch: ").strip()
+            if inp:
+                epochs = int(inp)
+            if epochs < 1:
+                print("   ❌ Minimal 1 epoch. Coba lagi.")
+        except (ValueError, EOFError):
+            print("   ❌ Masukkan angka yang valid.")
+    print(f"   ✅ Training: {epochs} epochs\n")
+
     results = model.train(
         data="trainings/hero_detector/data.yaml",
-        epochs=20,
+        epochs=epochs,
         imgsz=352,
         batch=16,
         lr0=0.005,
@@ -76,8 +89,7 @@ def main():
         project=str(project_dir),
         name="yolo11n_minimap",
         exist_ok=True,
-        workers=16,
-        freeze=10
+        workers=16
     )
 
     # Export ONNX
