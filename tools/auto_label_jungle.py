@@ -30,7 +30,7 @@ from vision.core.cropper import crop_region
 DATASET_DIR = Path("trainings/hero_detector")
 VIDEO_DIR = Path("videos")
 IMG_W, IMG_H = 350, 340
-BOX_SIZE = 34
+BOX_SIZE = 37
 
 AUTO_PREFIX = "auto_jngl_"
 
@@ -56,7 +56,7 @@ for t_path in sorted(TEMPLATE_DIR.glob("*.png")):
         TEMPLATES[8] = cv2.imread(str(t_path), cv2.IMREAD_GRAYSCALE)
     elif name == "lithowanderer":
         TEMPLATES[6] = cv2.imread(str(t_path), cv2.IMREAD_GRAYSCALE)
-    elif name == "lord":
+    elif name in ("legend", "lord"):
         TEMPLATES[2] = cv2.imread(str(t_path), cv2.IMREAD_GRAYSCALE)
     elif name == "molten_fiend":
         TEMPLATES[5] = cv2.imread(str(t_path), cv2.IMREAD_GRAYSCALE)
@@ -66,8 +66,8 @@ for t_path in sorted(TEMPLATE_DIR.glob("*.png")):
 # ── Camp Positions (PIXEL) — Derived from manual data ──
 JUNGLE_CAMPS = [
     # Lord (class 2) — 2 pit (dari manual labels)
-    {"id": "lord_top", "cls": 2, "px": 113, "py": 96},
-    {"id": "lord_bot", "cls": 2, "px": 241, "py": 241},
+    {"id": "legend_top", "cls": 2, "px": 113, "py": 96},
+    {"id": "legend_bot", "cls": 2, "px": 241, "py": 241},
     # Turtle (class 3) — tanpa template, skip auto-label
     # Thunder Fenrir / Blue Buff (class 4)
     {"id": "thunder_fenrir_a", "cls": 4, "px": 91, "py": 175},
@@ -218,7 +218,7 @@ def draw_preview(mm, results):
         10: (255, 100, 200), # Horned Lizard (Pink)
     }
     names = {
-        2: "lord", 3: "turtle", 4: "thunder_fenrir", 5: "molten_fiend",
+        2: "legend", 3: "turtle", 4: "thunder_fenrir", 5: "molten_fiend",
         6: "lithowanderer", 7: "crab", 8: "lava_golem", 9: "fire_beetle", 10: "horned_lizard",
     }
 
@@ -356,7 +356,7 @@ def main():
                 if args.preview:
                     vis = draw_preview(mm, results)
                     info = " | ".join(f"{n}={counts[c]}" for c, n in
-                                      [(2, "lord"), (3, "turtle"), (4, "b_buff"), (5, "r_buff"),
+                                      [(2, "legend"), (3, "turtle"), (4, "b_buff"), (5, "r_buff"),
                                        (6, "litho"), (7, "crab"), (8, "golem"), (9, "beetle"), (10, "lizard")] if c in counts)
                     cv2.putText(vis, f"[JNGL] Frame {frame_idx} — {info}", (10, 25),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
@@ -383,7 +383,7 @@ def main():
     print(f"  Total camp detections: {total_camps_detected}")
     print(f"  Per class:")
     for cls_id in sorted(class_total.keys()):
-        names = {2: "lord", 3: "turtle", 4: "thunder_fenrir", 5: "molten_fiend",
+        names = {2: "legend", 3: "turtle", 4: "thunder_fenrir", 5: "molten_fiend",
                  6: "lithowanderer", 7: "crab", 8: "lava_golem", 9: "fire_beetle", 10: "horned_lizard"}
         print(f"    {cls_id}: {names.get(cls_id, '?')}: {class_total[cls_id]}")
     print(f"\n  Mode: {'Merged into existing labels' if args.merge else 'Separate auto_ files'}")

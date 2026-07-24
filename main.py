@@ -125,6 +125,11 @@ TOOLS = {
         "desc": "Crop dataset skill icon dari video untuk training",
         "cmd": "python3 tools/crop_skills_dataset.py",
     },
+    "20": {
+        "name": "Export to Kaggle",
+        "desc": "Package dataset (.zip) + notebook siap upload ke Kaggle",
+        "cmd": "python3 tools/export_kaggle.py --zip",
+    },
 }
 
 # ── Quick presets ──
@@ -252,9 +257,8 @@ def dataset_status():
                 total_annotations += 1
 
     names = {
-        0: "blue_hero",
-        1: "red_hero",
-        2: "lord",
+        0: "hero",
+        2: "legend",
         3: "turtle",
         4: "thunder_fenrir",
         5: "molten_fiend",
@@ -373,7 +377,7 @@ def interactive_mode():
         print_banner()
         print_menu()
         print()
-        raw = input(f"  {C.BOLD}Pilih menu [1-19 / a/b/q/x]:{C.RESET} ")
+        raw = input(f"  {C.BOLD}Pilih menu [1-20 / a/b/q/x]:{C.RESET} ")
         # ESC key biasa kirim \x1b, q/x untuk exit
         if raw in ("\x1b", "\x1b[A", "\x1b[B", "\x1b[C", "\x1b[D", "", "q", "x"):
             print(f"\n  {C.YELLOW}👋 Bye!{C.RESET}")

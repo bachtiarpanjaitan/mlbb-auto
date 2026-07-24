@@ -18,14 +18,14 @@ from vision.core.cropper import crop_region
 DATASET_DIR = Path("trainings/hero_detector")
 VIDEO_DIR = Path("videos")
 IMG_W, IMG_H = 350, 340
-HERO_DOT_SIZE = 34  # Ukuran lingkaran dot hero lebih pas/presisi (34px)
+HERO_DOT_SIZE = 37  # Ukuran lingkaran dot hero lebih pas/presisi (34px)
 
 # Class definitions for all 11 classes in data.yaml
 CLASS_NAMES = {
     0: "blue_hero",
     1: "red_hero",
-    2: "lord",
-    3: "turtle",
+    2: "legend",
+    3: "legend",
     4: "thunder_fenrir",
     5: "molten_fiend",
     6: "lithowanderer",

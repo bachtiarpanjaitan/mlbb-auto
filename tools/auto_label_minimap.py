@@ -34,7 +34,7 @@ from vision.core.cropper import crop_region
 DATASET_DIR = Path("trainings/hero_detector")
 VIDEO_DIR = Path("videos")
 IMG_W, IMG_H = 350, 340
-HERO_DOT_SIZE = 34  # YOLO bounding box size (sama dengan label_minimap.py)
+HERO_DOT_SIZE = 37  # YOLO bounding box size (sama dengan label_minimap.py)
 
 # ── HSV ranges untuk hero rings ──
 # Blue team ring: cyan/light-blue (H ~90-120)

@@ -1,27 +1,19 @@
-# YOLOv11n dataset config — MLBB Minimap Detection
+# YOLOv11n dataset config — MLBB Minimap Detection (9 classes)
 # Classes:
-#   0  = blue_hero       (hero tim biru)
-#   1  = red_hero        (hero tim merah)
-#   2  = lord            (Lord Pit — sungai atas)
-#   3  = turtle          (Turtle Pit — sungai bawah)
-#   4  = thunder_fenrir  (Blue Buff, di dua sisi)
-#   5  = molten_fiend    (Red Buff, di dua sisi)
-#   6  = lithowanderer   (Litho — tengah)
-#   7  = crab            (Gold Crab, atas & bawah)
-#   8  = lava_golem      (Golem, dua sisi)
-#   9  = fire_beetle     (Beetle, dua sisi)
-#   10 = horned_lizard   (Lizard, dua sisi)
+#   0 = hero
+#   1 = legend (lord/turtle)
+#   2 = thunder_fenrir  (blue buff)
+#   3 = molten_fiend    (red buff)
+#   4 = lithowanderer
+#   5 = crab
+#   6 = lava_golem
+#   7 = fire_beetle
+#   8 = horned_lizard
 
 # Paths relative to project root
 path: trainings/hero_detector
 train: images/train
 val: images/val
 
-nc: 11
-names: [
-  'blue_hero', 'red_hero',
-  'lord', 'turtle',
-  'thunder_fenrir', 'molten_fiend',
-  'lithowanderer', 'crab',
-  'lava_golem', 'fire_beetle', 'horned_lizard'
-]
+nc: 9
+names: ['hero', 'legend', 'thunder_fenrir', 'molten_fiend', 'lithowanderer', 'crab', 'lava_golem', 'fire_beetle', 'horned_lizard']

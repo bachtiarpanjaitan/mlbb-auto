@@ -5,7 +5,7 @@ Memeriksa gambar training & validation beserta label YOLO (.txt).
 
 Fitur:
   - Navigasi tombol Panah Kiri (←) / Panah Kanan (→) atau A / D / N / P
-  - Menampilkan lingkaran/kotak bounding box label (Class 0: blue_hero, Class 1: red_hero)
+  - Menampilkan lingkaran/kotak bounding box label (Class 0: hero)
   - Zoom-in preview minimap dengan informasi detail piksel & label
 
 Penggunaan:
@@ -30,30 +30,28 @@ BLACK = (20, 20, 20)
 GRAY = (120, 120, 120)
 
 CLASS_NAMES = {
-    0: "blue_hero", 1: "red_hero",
-    2: "lord", 3: "turtle",
-    4: "thunder_fenrir", 5: "molten_fiend",
-    6: "lithowanderer", 7: "crab",
-    8: "lava_golem", 9: "fire_beetle", 10: "horned_lizard"
+    0: "hero",
+    1: "legend",
+    2: "thunder_fenrir", 3: "molten_fiend",
+    4: "lithowanderer", 5: "crab",
+    6: "lava_golem", 7: "fire_beetle", 8: "horned_lizard"
 }
 
 CLASS_COLORS = {
-    0: (255, 180, 30),    # Blue
-    1: (30, 30, 255),     # Red
-    2: (255, 0, 255),     # Lord (Magenta)
-    3: (0, 255, 0),       # Turtle (Green)
-    4: (255, 255, 0),     # Thunder Fenrir (Cyan)
-    5: (0, 140, 255),     # Molten Fiend (Orange)
-    6: (200, 255, 0),     # Lithowanderer (Yellow-Green)
-    7: (0, 215, 255),     # Crab (Gold)
-    8: (180, 0, 180),     # Lava Golem (Purple)
-    9: (0, 100, 255),     # Fire Beetle (Dark Orange)
-    10: (255, 100, 200),  # Horned Lizard (Pink)
+    0: (255, 180, 30),    # Hero
+    1: (255, 0, 255),     # Legend (Magenta)
+    2: (255, 255, 0),     # Thunder Fenrir (Cyan)
+    3: (0, 140, 255),     # Molten Fiend (Orange)
+    4: (200, 255, 0),     # Lithowanderer (Yellow-Green)
+    5: (0, 215, 255),     # Crab (Gold)
+    6: (180, 0, 180),     # Lava Golem (Purple)
+    7: (0, 100, 255),     # Fire Beetle (Dark Orange)
+    8: (255, 100, 200),  # Horned Lizard (Pink)
 }
 
 CLASS_KEYS = {
-    ord('b'): 0, ord('r'): 1, ord('l'): 2, ord('t'): 3,
-    ord('0'): 0, ord('1'): 1, ord('2'): 2, ord('3'): 3,
+    ord('b'): 0, ord('r'): 0, ord('l'): 2, ord('t'): 3,
+    ord('0'): 0, ord('1'): 0, ord('2'): 2, ord('3'): 3,
     ord('4'): 4, ord('5'): 5, ord('6'): 6, ord('7'): 7,
     ord('8'): 8, ord('9'): 9, ord('k'): 10, ord('K'): 10,
 }
@@ -108,7 +106,7 @@ def deduplicate_labels(labels: list[tuple[int, float, float, float, float]], w: 
     return deduped, has_changed
 
 
-def load_raw_labels(lbl_path: Path | None, auto_clean: bool = True) -> list[tuple[int, float, float, float, float]]:
+def load_raw_labels(lbl_path: Path | None, auto_clean: bool = False) -> list[tuple[int, float, float, float, float]]:
     """Baca data mentah label YOLO dari file txt dengan auto-deduplikasi."""
     if lbl_path is None or not lbl_path.exists():
         return []
@@ -155,9 +153,8 @@ def draw_labels_on_image(img: np.ndarray, labels_data: list[tuple[int, float, fl
         color = CLASS_COLORS.get(cls_id, GREEN)
         cls_name = CLASS_NAMES.get(cls_id, f"cls_{cls_id}")
 
-        # Gambar Kotak + Lingkaran Tengah
-        r = max(bw, bh) // 2
-        cv2.rectangle(vis, (x1, y1), (x2, y2), color, 2)
+        # Gambar Lingkaran (tanpa kotak)
+        r = max(bw, bh) // 2 + 3
         cv2.circle(vis, (cx, cy), max(2, r), color, 2)
         cv2.circle(vis, (cx, cy), 2, (255, 255, 255), -1)
 
@@ -198,7 +195,18 @@ def main():
     elif args.val:
         items = load_dataset_items(base_dir, "val")
     else:
-        items = load_dataset_items(base_dir, "train")
+        print("\nPilih dataset split:")
+        print("  [1] Train (default)")
+        print("  [2] Val / Sample")
+        print("  [3] Train + Val (gabung)")
+        choice = input("Pilihan [1]: ").strip()
+        if choice == "2":
+            items = load_dataset_items(base_dir, "val")
+        elif choice == "3":
+            items.extend(load_dataset_items(base_dir, "train"))
+            items.extend(load_dataset_items(base_dir, "val"))
+        else:
+            items = load_dataset_items(base_dir, "train")
 
     if not items:
         print(f"❌ Tidak ada gambar ditemukan di {base_dir.absolute()}")
@@ -216,31 +224,29 @@ def main():
     print(" Kontrol Labeling (Interaktif):")
     print("   [ Klik Kiri pada Kosong ] : Tambah dot mode aktif")
     print("   [ Klik pada Dot Ada ]    : Hapus dot tersebut")
-    print("   [ Klik Kanan ]           : Tambah red_hero (shortcut) / Hapus dot")
+    print("   [ Klik Kanan ]           : Hapus dot")
     print("   [ 0-9, K, B, R, L, T ]   : Pilih Class (0=Blue, 1=Red, 2-10=Jungle)")
     print("   [ TAB ]                  : Ganti class berikutnya")
     print("   [ U ] = Undo Dot  | [ C ] = Clear All Dots | [ E ] = Crop Jungle")
     print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
 
     current_idx = 0
-    active_class = 0  # Default class: blue_hero
+    active_class = 0  # Default class: hero
     display_scale = 1.6
     header_h = 130
     RIGHT_PANEL_W = 260
 
     # Shortcut legend for right panel
     CLASS_LABELS_SHORT = {
-        0:  "0/B: blue_hero",
-        1:  "1/R: red_hero",
-        2:  "2/L: lord",
-        3:  "3/T: turtle",
-        4:  "4:   blue_buff (fenrir)",
-        5:  "5:   red_buff (fiend)",
-        6:  "6:   lithowanderer",
-        7:  "7:   crab (gold)",
-        8:  "8:   lava_golem",
-        9:  "9:   fire_beetle",
-        10: "K/10:horned_lizard",
+        0:  "0: hero",
+        1:  "1: legend",
+        2:  "2: thunder_fenrir",
+        3:  "3: molten_fiend",
+        4:  "4: lithowanderer",
+        5:  "5: crab",
+        6:  "6: lava_golem",
+        7:  "7: fire_beetle",
+        8:  "8: horned_lizard",
     }
 
     window_name = "MLBB Minimap Dataset Inspector"
@@ -298,7 +304,7 @@ def main():
             # Add new dot
             target_cls = 1 if event == cv2.EVENT_RBUTTONDOWN else active_class
             c_name = CLASS_NAMES.get(target_cls, f"cls_{target_cls}")
-            dot_size = 34
+            dot_size = 37
             cx_norm = img_x / max(1, w)
             cy_norm = img_y / max(1, h)
             w_norm = dot_size / max(1, w)
@@ -349,12 +355,11 @@ def main():
                         (12, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.48, GREEN, 1, cv2.LINE_AA)
 
             # Label status
-            blue_cnt = sum(1 for l in labels_info if l["class_id"] == 0)
-            red_cnt = sum(1 for l in labels_info if l["class_id"] == 1)
+            hero_cnt = sum(1 for l in labels_info if l["class_id"] == 0)
             jungle_cnt = sum(1 for l in labels_info if l["class_id"] >= 2)
 
             if lbl_path and lbl_path.exists() and len(labels_info) > 0:
-                lbl_status = f"Labels: {len(labels_info)} | Blue:{blue_cnt} Red:{red_cnt} Jungle:{jungle_cnt}"
+                lbl_status = f"Labels: {len(labels_info)} | Hero:{hero_cnt} Jungle:{jungle_cnt}"
                 lbl_color = (200, 255, 200)
             else:
                 lbl_status = "Belum ada label / Empty"
@@ -376,7 +381,7 @@ def main():
 
             # Baris Bantuan Navigasi
             cv2.rectangle(canvas, (0, 80), (dw, header_h), (45, 45, 55), -1)
-            cv2.putText(canvas, "[Klik] Add/Del | [TAB] Ganti class | [U] Undo | [C] Clear | [X] Del | [<->] Nav",
+            cv2.putText(canvas, "[Klik] Add/Del | [TAB] Ganti | [U] Undo | [C] Clear | [X] Hapus File | [<->] Nav",
                         (12, 100), cv2.FONT_HERSHEY_SIMPLEX, 0.37, (0, 220, 255), 1, cv2.LINE_AA)
             cv2.putText(canvas, "[0-9/K/B/R/L/T] Pilih Class | [E] Crop Jungle | [Q] Quit",
                         (12, 118), cv2.FONT_HERSHEY_SIMPLEX, 0.37, (0, 220, 255), 1, cv2.LINE_AA)
@@ -396,8 +401,8 @@ def main():
             cv2.line(canvas, (panel_x + 8, 50), (panel_x + RIGHT_PANEL_W - 8, 50), (80, 80, 80), 1)
 
             y_off = 72
-            for cls_id in range(11):
-                color = CLASS_COLORS[cls_id]
+            for cls_id in sorted(CLASS_LABELS_SHORT.keys()):
+                color = CLASS_COLORS.get(cls_id, (100, 100, 100))
                 lbl = CLASS_LABELS_SHORT[cls_id]
                 count = sum(1 for l in labels_info if l["class_id"] == cls_id)
 
@@ -484,23 +489,18 @@ def main():
                         saved_count += 1
                 last_action_msg[0] = f"✂️ Crop {saved_count} patch ke assets/creeps_minimap/"
                 print(f"  {last_action_msg[0]}")
-        elif key in (ord('x'), ord('X'), 127, 8, 3014656, 65535, 2162688):  # X / Delete / Backspace -> HAPUS Gambar
+        elif key in (ord('x'), ord('X'), 127, 8, 3014656, 65535, 2162688):  # X / Delete / Backspace -> HAPUS FILE
             img_path, lbl_path = items[current_idx]
-            print(f" 🗑️ Hapus gambar & label: {img_path.name}")
-
             try:
                 img_path.unlink(missing_ok=True)
                 if lbl_path and lbl_path.exists():
                     lbl_path.unlink(missing_ok=True)
+                print(f" ✅ File & label dihapus: {img_path.name}")
             except Exception as e:
-                print(f" ❌ Gagal menghapus {img_path.name}: {e}")
-
+                print(f" ❌ Gagal: {e}")
             items.pop(current_idx)
-
             if not items:
-                print(" ✅ Semua sampel gambar telah diperiksa/dihapus.")
                 break
-
             if current_idx >= len(items):
                 current_idx = max(0, len(items) - 1)
 

@@ -55,7 +55,7 @@ def main():
 
     project_dir = Path("trainings/hero_detector").resolve()
 
-    print(f"   Classes: 11 (blue_hero, red_hero, lord, thunder_fenrir, molten_fiend, lithowanderer, crab, lava_golem, fire_beetle, horned_lizard)")
+    print(f"   Classes: 10 (hero, lord, thunder_fenrir, molten_fiend, lithowanderer, crab, lava_golem, fire_beetle, horned_lizard)")
 
     # Layer settings:
     #   freeze=N  — freeze first N layers, only train the rest
@@ -89,7 +89,7 @@ def main():
         project=str(project_dir),
         name="yolo11n_minimap",
         exist_ok=True,
-        workers=16
+        workers=8
     )
 
     # Export ONNX

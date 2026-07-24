@@ -29,7 +29,7 @@ from vision.core.cropper import crop_region
 DATASET_DIR = Path("trainings/hero_detector")
 VIDEO_DIR = Path("videos")
 IMG_W, IMG_H = 350, 340
-BOX_SIZE = 34
+BOX_SIZE = 37
 
 # Model paths
 MODEL_ONNX = Path("models/hero_tracker.onnx")
@@ -43,7 +43,7 @@ TEMPLATE_MATCH_THRESHOLD = 0.18
 
 # Threshold override per class
 TEMPLATE_THRESHOLD_OVERRIDES = {
-    2: 0.30,  # lord: hindari countdown timer
+    2: 0.30,  # legend: hindari countdown timer
 }
 
 # Frame skip
@@ -62,15 +62,15 @@ for t_path in sorted(TEMPLATE_DIR.glob("*.png")):
     elif name == "horned_lizard": TEMPLATES[10] = cv2.imread(str(t_path), cv2.IMREAD_GRAYSCALE)
     elif name == "lava_golem":    TEMPLATES[8] = cv2.imread(str(t_path), cv2.IMREAD_GRAYSCALE)
     elif name == "lithowanderer": TEMPLATES[6] = cv2.imread(str(t_path), cv2.IMREAD_GRAYSCALE)
-    elif name == "lord":     TEMPLATES[2] = cv2.imread(str(t_path), cv2.IMREAD_GRAYSCALE)
+    elif name in ("legend", "lord"): TEMPLATES[2] = cv2.imread(str(t_path), cv2.IMREAD_GRAYSCALE)
     elif name == "molten_fiend":  TEMPLATES[5] = cv2.imread(str(t_path), cv2.IMREAD_GRAYSCALE)
     elif name == "thunder_fenrir": TEMPLATES[4] = cv2.imread(str(t_path), cv2.IMREAD_GRAYSCALE)
 
 # ── Jungle Camp Fixed Positions (from manual data) ──
 JUNGLE_CAMPS = [
     # Lord (class 2) — 2 pit
-    {"id": "lord_top", "cls": 2, "px": 113, "py": 96},
-    {"id": "lord_bot", "cls": 2, "px": 241, "py": 241},
+    {"id": "legend_top", "cls": 2, "px": 113, "py": 96},
+    {"id": "legend_bot", "cls": 2, "px": 241, "py": 241},
     # Thunder Fenrir (class 4) — 2 sisi
     {"id": "thunder_fenrir_a", "cls": 4, "px": 91, "py": 175},
     {"id": "thunder_fenrir_b", "cls": 4, "px": 263, "py": 162},
@@ -146,7 +146,7 @@ def detect_heroes_yolo(model_info, mm):
             scores = out[4:, i]
             max_cls = int(np.argmax(scores))
             ms = float(scores[max_cls])
-            if max_cls not in {0, 1} or ms < 0.1:
+            if max_cls not in {0} or ms < 0.1:
                 continue
             cx, cy = float(out[0, i]), float(out[1, i])
             bw, bh = float(out[2, i]), float(out[3, i])
@@ -166,7 +166,7 @@ def detect_heroes_yolo(model_info, mm):
                 continue
             for i in range(len(r.boxes)):
                 cls_id = int(r.boxes.cls[i].item())
-                if cls_id not in {0, 1}:
+                if cls_id not in {0}:
                     continue
                 cx, cy = (r.boxes.xyxy[i][0].item() + r.boxes.xyxy[i][2].item()) / 2, \
                          (r.boxes.xyxy[i][1].item() + r.boxes.xyxy[i][3].item()) / 2
@@ -180,7 +180,7 @@ def detect_heroes_yolo(model_info, mm):
 
     # NMS for hero detection
     kept = []
-    for cls_id in [0, 1]:
+    for cls_id in [0]:
         cb = [b for b in boxes if b[0] == cls_id]
         cb.sort(key=lambda b: b[5], reverse=True)
         while cb:
