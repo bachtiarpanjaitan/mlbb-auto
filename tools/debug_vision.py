@@ -176,6 +176,7 @@ class DetectorManager:
         # ── Minimap Hero Tracker ──
         self.minimap_hero_tracker = MinimapHeroTracker(
             yolo_model_path="models/hero_tracker.onnx",
+            max_miss_frames=30,  # dot bertahan ~2 detik tanpa deteksi
         )
         self._minimap_coord_mapper = CoordinateMapper.from_layout()
 
