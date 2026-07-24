@@ -388,7 +388,7 @@ def main():
                 frame_idx += 1
                 continue
 
-            img_name = f"{AUTO_PREFIX}{vid.stem}_frame_{frame_idx}.png"
+            img_name = f"{AUTO_PREFIX}{vid.stem}_frame_{frame_idx}.png"  # Will be mapped to incremental after rename
 
             if not args.dry_run:
                 cv2.imwrite(str(DATASET_DIR / "images" / "train" / img_name), mm)

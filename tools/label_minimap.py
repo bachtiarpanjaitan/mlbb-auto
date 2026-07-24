@@ -139,6 +139,14 @@ def main():
         fps = cap.get(cv2.CAP_PROP_FPS)
         print(f"  Frames: {total_frames}, FPS: {fps:.1f}")
 
+        # Cari index terakhir untuk auto-increment
+        img_dir = DATASET_DIR / "images" / target_split
+        lbl_dir = DATASET_DIR / "labels" / target_split
+        existing = [f.stem for f in img_dir.glob("*.png") if f.stem.isdigit()]
+        last_idx = max((int(s) for s in existing), default=0)
+        save_counter = last_idx + 1
+        print(f"   📝 Index terakhir: {last_idx} → mulai dari {save_counter}")
+
         frame_idx = 0
         saved_count = 0
 
@@ -166,7 +174,7 @@ def main():
                 frame_idx += 1
                 continue
 
-            img_name = f"{vid.stem}_frame_{frame_idx}.png"
+            img_name = f"{save_counter}.png"
             display = mm.copy()
             display = cv2.resize(display, (IMG_W * 2, IMG_H * 2), interpolation=cv2.INTER_NEAREST)
             boxes = []
@@ -305,6 +313,7 @@ def main():
                         save_labels(img_name, boxes, target_split)
                         saved_count += 1
                         print(f"  ✅ Saved to [{target_split}] {img_name} ({len(boxes)} labels)")
+                        save_counter += 1
                     else:
                         print(f"  ⏭️  Skipped frame {frame_idx} (no labels)")
                     frame_idx += 30  # 1 detik (30fps)
@@ -316,6 +325,7 @@ def main():
                         save_labels(img_name, boxes, target_split)
                         saved_count += 1
                         print(f"  ✅ Saved to [{target_split}] {img_name} ({len(boxes)} labels)")
+                        save_counter += 1
                     else:
                         print(f"  ⏭️  Skipped frame {frame_idx} (tanpa label)")
                     break

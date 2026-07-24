@@ -77,8 +77,9 @@ JUNGLE_CAMPS = [
     # Molten Fiend (class 5) — 2 sisi
     {"id": "molten_fiend_a", "cls": 5, "px": 187, "py": 72},
     {"id": "molten_fiend_b", "cls": 5, "px": 165, "py": 264},
-    # Lithowanderer (class 6)
-    {"id": "lithowanderer", "cls": 6, "px": 139, "py": 132},
+    # Lithowanderer (class 6) — 2 posisi (sungai tengah atas & bawah)
+    {"id": "lithowanderer_a", "cls": 6, "px": 139, "py": 132},
+    {"id": "lithowanderer_b", "cls": 6, "px": 211, "py": 208},
     # Crab (class 7) — 2 sisi
     {"id": "crab_a", "cls": 7, "px": 69, "py": 88},
     {"id": "crab_b", "cls": 7, "px": 282, "py": 249},
@@ -305,8 +306,30 @@ def main():
             print(f"❌ No .mp4 videos found")
             return
     else:
-        ap.print_help()
-        return
+        # Interactive video picker (sama seperti debug_vision)
+        cs = sorted(VIDEO_DIR.glob("*.mp4"))
+        if not cs:
+            print(f"❌ No .mp4 videos found in {VIDEO_DIR}")
+            return
+        print("\n🎬 Pilih video untuk auto-label:")
+        for idx, vid in enumerate(cs, 1):
+            size_mb = vid.stat().st_size / (1024 * 1024)
+            print(f"  [{idx}] {vid.name} ({size_mb:.1f} MB)")
+        print(f"  [a] Semua video ({len(cs)} file)")
+        while True:
+            try:
+                choice = input(f"\nMasukkan nomor video (1-{len(cs)}) [a]: ").strip().lower()
+                if not choice or choice == 'a':
+                    video_files = cs
+                    break
+                selected_idx = int(choice) - 1
+                if 0 <= selected_idx < len(cs):
+                    video_files = [cs[selected_idx]]
+                    break
+                print(f"❌ Masukkan angka 1-{len(cs)} atau 'a'")
+            except (ValueError, EOFError):
+                video_files = cs
+                break
 
     # Load YOLO
     print("📦 Loading YOLO model...")

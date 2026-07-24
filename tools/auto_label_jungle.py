@@ -75,8 +75,9 @@ JUNGLE_CAMPS = [
     # Molten Fiend / Red Buff (class 5)
     {"id": "molten_fiend_a", "cls": 5, "px": 187, "py": 72},
     {"id": "molten_fiend_b", "cls": 5, "px": 165, "py": 264},
-    # Lithowanderer (class 6)
-    {"id": "lithowanderer", "cls": 6, "px": 139, "py": 132},
+    # Lithowanderer (class 6) — 2 posisi (sungai tengah atas & bawah)
+    {"id": "lithowanderer_a", "cls": 6, "px": 139, "py": 132},
+    {"id": "lithowanderer_b", "cls": 6, "px": 211, "py": 208},
     # Crab (class 7) — 2 sisi
     {"id": "crab_a", "cls": 7, "px": 69, "py": 88},
     {"id": "crab_b", "cls": 7, "px": 282, "py": 249},

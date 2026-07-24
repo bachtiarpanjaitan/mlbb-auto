@@ -110,6 +110,21 @@ TOOLS = {
         "desc": "Label minimap via GUI (B=blue, R=red, J=jungle)",
         "cmd": "bash scripts/label_minimap.sh",
     },
+    "17": {
+        "name": "Train Skill Classifier",
+        "desc": "Training CNN untuk deteksi cooldown skill hero",
+        "cmd": "bash scripts/train_skill.sh",
+    },
+    "18": {
+        "name": "Train CD Number",
+        "desc": "Training OCR untuk angka cooldown skill",
+        "cmd": "bash scripts/train_cd.sh",
+    },
+    "19": {
+        "name": "Crop Skills Dataset",
+        "desc": "Crop dataset skill icon dari video untuk training",
+        "cmd": "python3 tools/crop_skills_dataset.py",
+    },
 }
 
 # ── Quick presets ──
@@ -317,7 +332,7 @@ def run_tool(choice: str, extra_args: str = ""):
         elif choice == "b":
             run_full_pipeline()
             return
-        elif choice == "x":
+        elif choice in ("x", "q"):
             print(f"\n  {C.CYAN}👋 Bye!{C.RESET}")
             sys.exit(0)
         else:
@@ -358,7 +373,12 @@ def interactive_mode():
         print_banner()
         print_menu()
         print()
-        choice = input(f"  {C.BOLD}Pilih menu [1-16 / a/b/x]:{C.RESET} ").strip().lower()
+        raw = input(f"  {C.BOLD}Pilih menu [1-19 / a/b/q/x]:{C.RESET} ")
+        # ESC key biasa kirim \x1b, q/x untuk exit
+        if raw in ("\x1b", "\x1b[A", "\x1b[B", "\x1b[C", "\x1b[D", "", "q", "x"):
+            print(f"\n  {C.YELLOW}👋 Bye!{C.RESET}")
+            sys.exit(0)
+        choice = raw.strip().lower()
         run_tool(choice)
 
 

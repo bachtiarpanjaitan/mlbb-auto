@@ -483,7 +483,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    parser.add_argument("videos", nargs="+", help="Video file(s) to process")
+    parser.add_argument("videos", nargs="*", help="Video file(s) to process")
     parser.add_argument("--interval", type=int, default=15,
                         help="Process every Nth frame (default: 15 = ~0.5s at 30fps)")
     parser.add_argument("--max-frames", type=int, default=None,
@@ -504,6 +504,31 @@ def main():
         collector = DatasetCollector()
         collector.print_dataset_stats()
         return
+
+    # Interactive video picker kalo video tidak diberikan
+    if not args.videos:
+        vd = Path("videos")
+        cs = sorted(vd.glob("*.mp4"))
+        if not cs:
+            print("❌ No .mp4 videos found in videos/")
+            sys.exit(1)
+        print("\n🎬 Pilih video untuk crop skills dataset:")
+        for idx, vid in enumerate(cs, 1):
+            size_mb = vid.stat().st_size / (1024 * 1024)
+            print(f"  [{idx}] {vid.name} ({size_mb:.1f} MB)")
+        while True:
+            try:
+                choice = input(f"\nMasukkan nomor video (wajib) [1-{len(cs)}]: ").strip()
+                if not choice:
+                    print("❌ Wajib pilih video.")
+                    continue
+                selected_idx = int(choice) - 1
+                if 0 <= selected_idx < len(cs):
+                    args.videos = [str(cs[selected_idx])]
+                    break
+                print(f"❌ Masukkan angka 1-{len(cs)}")
+            except (ValueError, EOFError):
+                print("❌ Masukkan angka yang valid.")
 
     # Interactive mode hanya untuk 1 video
     if args.interactive and len(args.videos) > 1:
