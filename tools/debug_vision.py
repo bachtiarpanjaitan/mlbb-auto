@@ -1668,7 +1668,7 @@ def main():
     layout_edit_mode = False  # editor mati default, tekan E untuk aktifkan
 
     detect_every = 45        # deteksi hero panel tiap 45 frame (~1.5s pada 30fps)
-    minimap_every = 5         # minimap tracking tiap 5 frame (~6 fps pada 30fps video, sangat hemat CPU)
+    minimap_every = 1         # minimap tracking tiap frame (smooth; thread handle backpressure via queue maxsize=2)
     frame_count = 0
 
     clean_frame = None  # snapshot saat pause
@@ -1766,11 +1766,19 @@ def main():
         if not paused:
             r, fr = cap.read()
             if not r:
+                # Flush remaining data sebelum quit
                 if export_enabled and exporter.count > 0:
                     exporter.flush_and_reset(match_id or f"match_{int(time.time())}")
-                cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                frame_count = 0
-                continue
+                print("\n🎥 Video selesai — tekan tombol apa saja untuk keluar")
+                # Tampilkan layar hitam dengan pesan "Video ended"
+                end_frame = np.zeros((fh, fw, 3), dtype=np.uint8)
+                cv2.putText(end_frame, "VIDEO ENDED — Press any key to exit",
+                            (fw // 4, fh // 2), cv2.FONT_HERSHEY_SIMPLEX,
+                            1.5, (255, 255, 255), 3, cv2.LINE_AA)
+                vis_frame = cv2.resize(end_frame, (dw, dh))
+                cv2.imshow("MLBB Debug", vis_frame)
+                cv2.waitKey(0)
+                break
 
             # Frame skipping untuk speed tinggi
             skip_frames = int(speed_mult / 2) if speed_mult >= 4 else 0
