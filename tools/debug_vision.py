@@ -23,7 +23,6 @@ from vision.core.cropper import crop_region
 from vision.ocr.reader import OCRReader
 from vision.detectors import HPDetector, ManaDetector, LevelDetector, GoldDetector
 from vision.detectors import SkillsDetector
-from vision.detectors.skills.cd_number import CDNumberDetector
 from vision.matcher.template import TemplateMatcher
 from vision.detectors.team.blue_team import BlueTeamDetector, RedTeamDetector, create_red_team_detector
 from vision.detectors.minimap.minimap_hero_tracker import MinimapHeroTracker
@@ -51,9 +50,8 @@ class DetectorManager:
         self.level_det = LevelDetector(self.ocr)
         self.gold_det = GoldDetector(self.ocr)
         self.skills_det = SkillsDetector(self.ocr)
-        self.cd_number_det = CDNumberDetector()
         self._cached_hero_name: str | None = None
-        self._cd_smooth: dict[str, int] = {}  # skill_name -> last stable CD number
+        self._seen_active: set[str] = set()  # skill pernah terlihat cooldown/available → unlocked
 
         # ── Load hero database ──
         base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -496,9 +494,6 @@ class DetectorManager:
                     skill_info["cooldown"] = not skill_info["ready"]
                     skill_info["brightness"] = round(float(avg), 1)
 
-                # Update cooldown: visual check (deteksi gelap) + timer kalkulasi
-                self._update_skill_cooldown(skill_name, skill_img, skill_info, video_time)
-
                 # ── Battle spell identification (periodic retry, bukan one-shot) ──
                 if skill_name == "battle_spell" and self._spell_matcher is not None:
                     should_identify = (
@@ -527,10 +522,9 @@ class DetectorManager:
                     if self._cached_spell_key:
                         skill_info["spell_name"] = self._cached_spell_key
 
-                # ═══ Battle spell: model CNN sudah handle lewat _update_skill_cooldown ═══
-                skills_status[skill_name] = skill_info
-        if skills_status:
-            status["skills"] = skills_status
+                # ═══ Skills dikelola oleh fast detection di main thread ═══
+                pass
+        # skills_status tidak diset ke status — fast detection yang handle
 
         return status
 
@@ -727,28 +721,29 @@ class DetectorManager:
     def _update_skill_cooldown(self, skill_name: str, skill_img: np.ndarray | None,
                                skill_info: dict[str, Any], video_time: float = 0):
         """
-        Update skill state — model CNN sebagai sumber kebenaran.
+        Update skill state — cuma hysteresis anti flicker. Gak ada level gate / timer / CDR.
 
-        Model udah belajar dari pixel icon skill (ready/cooldown/available/locked).
-        Gak perlu hysteresis, timer, CDR, atau reference comparison lagi.
+        Hanya hysteresis anti flicker. Model CNN sumber kebenaran.
         """
-        # ═══ Level gating: cek apakah skill sudah terbuka sesuai level hero ═══
-        hero_lvl = getattr(self, '_cached_level', None) or 0
-        unlock_lvl = self._get_skill_unlock_level(skill_name)
-        if unlock_lvl > 0 and hero_lvl < unlock_lvl:
-            skill_info["ready"] = False
-            skill_info["cooldown"] = False
-            skill_info["available"] = False
-            skill_info["locked"] = True
-            skill_info.pop("remaining_cd", None)
-            return
+        # ══ Track skill yg pernah dipake ══
+        if skill_info.get("cooldown", False):
+            self._seen_active.add(skill_name)
 
-        # ═══ Model CNN sebagai sumber kebenaran ═══
-        # "available" (highlight border) = siap dipakai
-        if skill_info.get("available", False):
+        # ══ UNAVAILABLE flag: skill blm pernah cooldown ══
+        hero_lvl = getattr(self, '_cached_level', None) or 1
+        skill_info["unavailable"] = (skill_name not in self._seen_active 
+                                     and hero_lvl < 4 
+                                     and skill_name != "battle_spell")
+
+        # ══ Model output langsung — gak perlu hysteresis ══
+        is_cd = skill_info.get("cooldown", False)
+        is_ready = skill_info.get("available", False) or skill_info.get("ready", False)
+        if is_ready:
             skill_info["ready"] = True
-
-        # Hapus field yang gak diperlukan
+            skill_info["cooldown"] = False
+        elif is_cd:
+            skill_info["cooldown"] = True
+            skill_info["ready"] = False
         skill_info.pop("remaining_cd", None)
 
 
@@ -1122,15 +1117,18 @@ def draw_status_overlay(frame: np.ndarray, status: dict[str, Any]):
             if s.get("locked", False):
                 text = f"  {label}: LOCKED"
                 color = (100, 100, 100)
+            elif s.get("unavailable", False):
+                text = f"  {label}: UNAVAILABLE"
+                color = (150, 150, 150)
             elif s.get("ready", False):
                 text = f"  {label}: READY"
                 color = (100, 255, 100)
             elif s.get("cooldown", False):
                 remaining = s.get("remaining_cd")
                 if remaining is not None and remaining > 0:
-                    text = f"  {label}: CD({remaining:.0f}s)"
+                    text = f"  {label}: COOLDOWN({remaining:.0f}s)"
                 else:
-                    text = f"  {label}: CD"
+                    text = f"  {label}: COOLDOWN"
                 color = (255, 100, 100)
             else:
                 text = f"  {label}: --"
@@ -1440,6 +1438,7 @@ _auto_collect_count = 0
 _auto_collect_skills = False
 _auto_collect_locked = False
 _locked_end_time = 0.0
+_last_skills: dict = {}
 
 def _collect_skill_samples(frame: np.ndarray, detector: DetectorManager,
                             frame_idx: int, video_time: float,
@@ -1497,7 +1496,7 @@ def _collect_skill_samples(frame: np.ndarray, detector: DetectorManager,
 # ── Main ──────────────────────────────────────────────────────────────
 
 def main():
-    global _auto_collect_skills, _auto_collect_count, _auto_collect_locked, _locked_end_time
+    global _auto_collect_skills, _auto_collect_count, _auto_collect_locked, _locked_end_time, _last_skills
     ap = argparse.ArgumentParser()
     ap.add_argument("video", nargs="?")
     ap.add_argument("--overlay", action="store_true", default=True,
@@ -1793,16 +1792,12 @@ def main():
         # Baca status terbaru dari vision thread
         with vision_status_lock:
             current_status = dict(vision_status) if vision_status else {}
+        # Restore skills dari fast detection (vision thread gak set skills)
+        if "skills" not in current_status and _last_skills:
+            current_status["skills"] = _last_skills
 
-        # ── Reapply CD numbers setelah vision thread update (anti flicker) ──
-        skills_dict = current_status.get("skills")
-        if skills_dict and detector_mgr._cd_smooth:
-            for sn, cd_val in list(detector_mgr._cd_smooth.items()):
-                if sn in skills_dict:
-                    skills_dict[sn]["remaining_cd"] = cd_val
-
-        # ── Skills detection cepat di main thread (tiap ~0.17s, update overlay) ──
-        if not paused and frame_count % 5 == 0:
+# ── Skills detection cepat di main thread (tiap ~0.17s, update overlay) ──
+        if not paused and frame_count % 2 == 0:
             try:
                 skills_status = {}
                 for sn in ("skill_1", "skill_2", "skill_3", "skill_4", "battle_spell"):
@@ -1814,34 +1809,10 @@ def main():
                             detector_mgr._update_skill_cooldown(sn, si, info, video_time)
                             if sn == "battle_spell" and detector_mgr._cached_spell_key:
                                 info["spell_name"] = detector_mgr._cached_spell_key
-                            # Baca angka cooldown dengan smoothing (anti flicker)
-                            if info.get("cooldown", False):
-                                cd_val = detector_mgr.cd_number_det.read(si)
-                                if cd_val is not None and 1 <= cd_val <= 120:
-                                    prev = detector_mgr._cd_smooth.get(sn)
-                                    if prev is None:
-                                        detector_mgr._cd_smooth[sn] = cd_val
-                                        info["remaining_cd"] = cd_val
-                                    elif cd_val <= prev:
-                                        # Countdown menurun → update
-                                        detector_mgr._cd_smooth[sn] = cd_val
-                                        info["remaining_cd"] = cd_val
-                                    elif cd_val >= prev + 5:
-                                        # Lompatan besar → skill dipake lagi (CD baru)
-                                        detector_mgr._cd_smooth[sn] = cd_val
-                                        info["remaining_cd"] = cd_val
-                                    else:
-                                        # Naik dikit (flicker) → tetap pake prev
-                                        info["remaining_cd"] = prev
-                                elif prev is not None:
-                                    # Cooldown tapi angka gak kebaca → tetap pake prev
-                                    info["remaining_cd"] = prev
-                            else:
-                                # Skill gak cooldown → hapus smoothing
-                                detector_mgr._cd_smooth.pop(sn, None)
                             skills_status[sn] = info
                 if skills_status:
                     current_status["skills"] = skills_status
+                    _last_skills = skills_status
             except Exception:
                 pass
 
@@ -1951,6 +1922,7 @@ def main():
             detector_mgr._cd_confirm_count.clear()
             detector_mgr._cd_ready_count.clear()
             detector_mgr._cd_ocr_results.clear()
+            detector_mgr._seen_active.clear()
             if hasattr(detector_mgr, '_cd_ref_images'):
                 detector_mgr._cd_ref_images.clear()
                 detector_mgr._cd_ref_brightness.clear()

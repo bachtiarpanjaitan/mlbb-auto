@@ -87,21 +87,34 @@ class CDNumberCNN(nn.Module):
 def generate_synthetic_cd(cd_value: int) -> np.ndarray:
     """
     Generate 70x70 image mirip CD number di game MLBB.
-    Background gelap polos, angka putih di center.
+    - Background: cooldown overlay (gelap + icon texture)
+    - Angka: agak tipis, putih redup, center
     """
-    b = random.randint(20, 50)
+    # Cooldown overlay background (texture gelap + noise)
+    b = random.randint(25, 55)
     img = np.full((INPUT_SIZE, INPUT_SIZE, 3), b, dtype=np.uint8)
+    # Icon texture hint (acak)
+    texture = np.random.randint(0, 15, (INPUT_SIZE, INPUT_SIZE, 3), dtype=np.uint8)
+    img = cv2.addWeighted(img, 0.85, texture, 0.15, 0)
 
     text = str(cd_value)
-    scale = 1.0 if len(text) <= 1 else (0.85 if len(text) == 2 else 0.7)
-    text_size = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, scale, 2)[0]
+
+    # Font: HERSEY_PLAIN = lebih tipis (simulasi font game)
+    # Scale lebih kecil biar angka gak terlalu gedhe
+    scale = 0.7 if len(text) <= 1 else (0.6 if len(text) == 2 else 0.5)
+    text_size = cv2.getTextSize(text, cv2.FONT_HERSHEY_PLAIN, scale, 1)[0]
     tx = (INPUT_SIZE - text_size[0]) // 2
-    ty = (INPUT_SIZE + text_size[1]) // 2 - 2
-    brightness = random.randint(160, 220)
-    cv2.putText(img, text, (tx, ty), cv2.FONT_HERSHEY_SIMPLEX, scale,
-                (brightness, brightness, brightness), random.choice([1, 2]), cv2.LINE_AA)
-    if random.random() < 0.15:
+    ty = (INPUT_SIZE + text_size[1]) // 2
+
+    # Angka: putih redup (180-200), tipis (thickness=1), biar mirip game
+    brightness = random.randint(170, 210)
+    cv2.putText(img, text, (tx, ty), cv2.FONT_HERSHEY_PLAIN, scale,
+                (brightness, brightness, brightness), 1, cv2.LINE_AA)
+
+    # Kadang blur (simulasi rendering game)
+    if random.random() < 0.2:
         img = cv2.GaussianBlur(img, (3, 3), 0)
+
     return img
 
 
@@ -109,18 +122,20 @@ class SyntheticCDDataset(Dataset):
     """Generate synthetic cooldown number dataset."""
 
     def __init__(self, size: int = 10000, augment: bool = True,
-                 real_data_dir: str | Path | None = None):
+                 real_data_dir: str | Path | None = None,
+                 cache_dir: str | Path | None = None):
         self.size = size
         self.augment = augment
         self.cd_values = []
         self.real_data: list[tuple[np.ndarray, int]] = []
+        self._cache: list[np.ndarray] | None = None
+        self._cache_dir = Path(cache_dir) if cache_dir else None
 
         # Load real data jika ada
         if real_data_dir:
             real_path = Path(real_data_dir)
             if real_path.exists():
                 for fname in sorted(real_path.glob("*.png")):
-                    # Extract CD value from filename: "..._cd012.png"
                     parts = fname.stem.split("_")
                     for p in parts:
                         if p.startswith("cd") and p[2:].isdigit():
@@ -133,6 +148,22 @@ class SyntheticCDDataset(Dataset):
 
         # Synthetic distribution
         sync_size = max(size - len(self.real_data), size // 2)
+
+        # Cek cache synthetic di disk
+        if self._cache_dir:
+            self._cache_dir.mkdir(parents=True, exist_ok=True)
+            cache_files = sorted(self._cache_dir.glob("*.npy"))
+            if len(cache_files) >= sync_size:
+                import time
+                t0 = time.time()
+                self._cache = []
+                for cf in cache_files[:sync_size]:
+                    self._cache.append(np.load(str(cf)))
+                    val = int(cf.stem.split("_")[0])
+                    self.cd_values.append(val)
+                print(f"  Loaded {len(self._cache)} cached synthetic ({time.time()-t0:.1f}s)")
+                return  # Skip generation
+
         for _ in range(sync_size):
             r = random.random()
             if r < 0.70:
@@ -142,6 +173,19 @@ class SyntheticCDDataset(Dataset):
             else:
                 v = random.randint(61, MAX_CD)
             self.cd_values.append(v)
+        self._generate_and_cache()
+
+    def _generate_and_cache(self):
+        """Generate synthetic data and cache to disk."""
+        import time
+        t0 = time.time()
+        self._cache = []
+        for i, v in enumerate(self.cd_values):
+            img = generate_synthetic_cd(v)
+            self._cache.append(img)
+            if self._cache_dir:
+                np.save(str(self._cache_dir / f"{v:03d}_{i:05d}.npy"), img)
+        print(f"  Generated + cached {len(self._cache)} synthetic ({time.time()-t0:.0f}s)")
 
     def __len__(self):
         return self.size
@@ -198,6 +242,45 @@ class SyntheticCDDataset(Dataset):
 #  Training
 # ═══════════════════════════════════════════════════════════════════════
 
+
+def auto_scan_hero_dataset(hero_dir: str | Path, cd_dir: str | Path,
+                           cd_model_path: str | Path | None = None) -> int:
+    """Scan hero_skills/dataset untuk cooldown crops → copy ke cd_number dataset."""
+    import sys
+    if 'vision' not in sys.modules:
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    import cv2; from vision.detectors.skills.cd_number import CDNumberDetector
+    hero_dir = Path(hero_dir)
+    cd_dir = Path(cd_dir)
+    cd_dir.mkdir(parents=True, exist_ok=True)
+
+    det = CDNumberDetector()
+    if cd_model_path and os.path.isfile(str(cd_model_path)):
+        det = CDNumberDetector()
+    if not det.available:
+        print("  ⚠️  CD model not available, skip auto-scan")
+        return 0
+
+    saved = 0
+    for hero_entry in sorted(hero_dir.iterdir()):
+        if not hero_entry.is_dir(): continue
+        for slot_dir in sorted(hero_entry.iterdir()):
+            if not slot_dir.is_dir(): continue
+            cd_folder = slot_dir / 'cooldown'
+            if not cd_folder.exists(): continue
+            for img_path in sorted(cd_folder.glob('*.png')):
+                img = cv2.imread(str(img_path))
+                if img is None: continue
+                cd_val = det.read(img)
+                if cd_val is not None and 1 <= cd_val <= 120:
+                    fname = f'{hero_entry.name}_{slot_dir.name}_cd{cd_val:03d}.png'
+                    dst = cd_dir / fname
+                    if not dst.exists():
+                        cv2.imwrite(str(dst), cv2.cvtColor(img, cv2.COLOR_BGR2GRAY))
+                        saved += 1
+    print(f"  📋 Auto-scan hero dataset: {saved} new CD samples")
+    return saved
+
 def train():
     BASE = Path(__file__).resolve().parent.parent
     parser = argparse.ArgumentParser(
@@ -224,9 +307,15 @@ def train():
     print(f"  Epochs:   {args.epochs}")
     print(f"  Dataset:  {args.dataset_size} synthetic")
 
+    # ── Auto-scan hero_skills dataset untuk cooldown crops ──
+    hero_dataset = BASE / "trainings" / "hero_skills" / "dataset"
+    if hero_dataset.exists():
+        auto_scan_hero_dataset(hero_dataset, args.real_data if os.path.isdir(args.real_data) else BASE / "trainings" / "cd_number" / "real_dataset")
+
     # ── Dataset ──
-    real_path = args.real_data if os.path.isdir(args.real_data) else None
-    ds = SyntheticCDDataset(size=args.dataset_size, real_data_dir=real_path)
+    real_path = args.real_data if os.path.isdir(args.real_data) else str(BASE / "trainings" / "cd_number" / "real_dataset")
+    cache_dir = BASE / 'trainings' / 'cd_number' / 'cache'
+    ds = SyntheticCDDataset(size=args.dataset_size, real_data_dir=real_path, cache_dir=cache_dir)
     val_size = int(len(ds) * 0.1)
     train_ds, val_ds = torch.utils.data.random_split(
         ds, [len(ds) - val_size, val_size],

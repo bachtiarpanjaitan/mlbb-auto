@@ -21,8 +21,27 @@ done
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
+# Auto-resume dari checkpoint terakhir (kalau ada)
+CKPT="trainings/hero_skills/checkpoints/best.pt"
+if [ -f "$CKPT" ]; then
+    # Cek apakah user sudah provide --resume
+    case "$*" in
+        *--resume*) HAS_RESUME=1 ;;
+        *) HAS_RESUME=0 ;;
+    esac
+    if [ "$HAS_RESUME" = "0" ]; then
+        echo "  🔄 Auto-resume: $CKPT"
+        EXTRA="--resume $CKPT"
+    else
+        EXTRA=""
+    fi
+else
+    echo "  🆕 Training from scratch"
+    EXTRA=""
+fi
+
 # Run training
-python3 tools/train_skill_classifier.py "$@"
+python3 tools/train_skill_classifier.py $EXTRA "$@"
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
