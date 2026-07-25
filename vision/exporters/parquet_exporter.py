@@ -81,30 +81,30 @@ FRAME_COLUMNS = [
     "battle_spell_remaining_cd",
     "battle_spell_name",       # str — nama spell
 
-    # Blue team (5 hero dari scoreboard)
-    "blue_team_complete",      # bool
+    # Team roster (10 hero, no blue/red split)
+    "team_complete",      # bool
 ]
-# Blue/Red hero slots 1-5
-for team in ("blue", "red"):
-    for slot in range(1, 6):
-        FRAME_COLUMNS += [
-            f"{team}_hero_{slot}_name",
-            f"{team}_hero_{slot}_hp_pct",
-        ]
+# Hero slots 1-10
+for slot in range(1, 11):
+    FRAME_COLUMNS += [
+        f"hero_{slot}_name",
+        f"hero_{slot}_team",
+        f"hero_{slot}_hp_pct",
+    ]
 
-# Minimap hero positions (10 hero + jungle)
-for team in ("blue", "red"):
-    for slot in range(1, 6):
-        FRAME_COLUMNS += [
-            f"{team}_mm_{slot}_name",
-            f"{team}_mm_{slot}_norm_x",
-            f"{team}_mm_{slot}_norm_y",
-            f"{team}_mm_{slot}_game_x",
-            f"{team}_mm_{slot}_game_y",
-            f"{team}_mm_{slot}_confidence",
-            f"{team}_mm_{slot}_region",
-            f"{team}_mm_{slot}_lane",
-        ]
+# Minimap hero positions (10 hero, no blue/red split)
+for slot in range(1, 11):
+    FRAME_COLUMNS += [
+        f"mm_{slot}_name",
+        f"mm_{slot}_team",
+        f"mm_{slot}_norm_x",
+        f"mm_{slot}_norm_y",
+        f"mm_{slot}_game_x",
+        f"mm_{slot}_game_y",
+        f"mm_{slot}_confidence",
+        f"mm_{slot}_region",
+        f"mm_{slot}_lane",
+    ]
 
 # Jungle objectives (dinamis — max 15)
 for j in range(1, 16):
@@ -295,6 +295,8 @@ class GameStateExporter:
         self.flush_every = flush_every
         self._buffer: list[dict[str, Any]] = []
         self._frame_count = 0
+        self._prev_positions: dict[str, tuple[float, float]] = {}  # slot -> (nx, ny)
+        self._max_move = 0.15  # max normalized distance per frame (~52px)
 
         if auto_install and not HAS_PYARROW:
             self._auto_install()
@@ -318,8 +320,28 @@ class GameStateExporter:
             logger.warning("Failed to install pyarrow+pandas: %s", e)
 
     def append(self, frame_idx: int, video_time: float, status: dict[str, Any]):
-        """Collect satu frame game state ke buffer."""
+        """Collect satu frame game state ke buffer dengan outlier rejection."""
         row = _flatten_status(frame_idx, video_time, status)
+
+        # Outlier rejection: reject hero positions that jump too far
+        for slot in range(1, 11):
+            nx = row.get(f"mm_{slot}_norm_x")
+            ny = row.get(f"mm_{slot}_norm_y")
+            if nx is None or ny is None:
+                continue
+
+            key = f"mm_{slot}"
+            if key in self._prev_positions:
+                px, py = self._prev_positions[key]
+                dist = ((nx - px) ** 2 + (ny - py) ** 2) ** 0.5
+                if dist > self._max_move:
+                    # Reject outlier: use previous position with small prediction
+                    row[f"mm_{slot}_norm_x"] = px
+                    row[f"mm_{slot}_norm_y"] = py
+                    continue
+
+            self._prev_positions[key] = (nx, ny)
+
         self._buffer.append(row)
         self._frame_count += 1
 
@@ -368,6 +390,7 @@ class GameStateExporter:
     def flush_and_reset(self, match_id: str):
         """Tulis buffer lalu kosongkan."""
         self.flush(match_id, keep_buffer=False)
+        self._prev_positions.clear()
 
     @property
     def count(self) -> int:

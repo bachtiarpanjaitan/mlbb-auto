@@ -465,55 +465,52 @@ def _detect_contacts(data: dict, frame_idx: int,
     contacts = []
     contact_dist = 0.10  # max normalised distance for "near enemy"
 
-    for team in ("blue", "red"):
-        enemy_team = "red" if team == "blue" else "blue"
-        for slot in range(1, 6):
-            key = f"{team}_hero_{slot}_hp_pct"
-            hp = data.get(key, np.array([np.nan]))[frame_idx]
-            prev_val = prev_hp.get(key)
-            prev_fr = prev_hp_frame.get(key, -1)
+    for slot in range(1, 11):
+        key = f"hero_{slot}_hp_pct"
+        team = str(data.get(f"mm_{slot}_team", np.array([""]))[frame_idx])
+        hp = data.get(key, np.array([np.nan]))[frame_idx]
+        prev_val = prev_hp.get(key)
+        prev_fr = prev_hp_frame.get(key, -1)
 
-            if np.isnan(hp) or prev_val is None or np.isnan(prev_val):
+        if np.isnan(hp) or prev_val is None or np.isnan(prev_val):
+            continue
+
+        if abs(hp - prev_val) < 0.001 or (frame_idx - prev_fr) > 3:
+            continue
+
+        drop = prev_val - hp
+        if drop < 0.03:
+            continue
+
+        nx = data.get(f"mm_{slot}_norm_x", np.array([np.nan]))[frame_idx]
+        ny = data.get(f"mm_{slot}_norm_y", np.array([np.nan]))[frame_idx]
+        if np.isnan(nx) or np.isnan(ny):
+            continue
+
+        best_enemy = None
+        best_dist = float("inf")
+        for eslot in range(1, 11):
+            if eslot == slot:
                 continue
-
-            # Only trigger on actual HP change (not stale data)
-            if abs(hp - prev_val) < 0.001 or (frame_idx - prev_fr) > 3:
+            enx = data.get(f"mm_{eslot}_norm_x", np.array([np.nan]))[frame_idx]
+            eny = data.get(f"mm_{eslot}_norm_y", np.array([np.nan]))[frame_idx]
+            if np.isnan(enx) or np.isnan(eny):
                 continue
+            dist = ((nx - enx) ** 2 + (ny - eny) ** 2) ** 0.5
+            if dist < contact_dist and dist < best_dist:
+                best_dist = dist
+                best_enemy = (enx, eny)
 
-            drop = prev_val - hp
-            if drop < 0.03:  # minimum 3% HP drop
-                continue
-
-            # Get this hero's position
-            nx = data.get(f"{team}_mm_{slot}_norm_x", np.array([np.nan]))[frame_idx]
-            ny = data.get(f"{team}_mm_{slot}_norm_y", np.array([np.nan]))[frame_idx]
-            if np.isnan(nx) or np.isnan(ny):
-                continue
-
-            # Find nearest enemy within contact_dist
-            best_enemy = None
-            best_dist = float("inf")
-            for eslot in range(1, 6):
-                enx = data.get(f"{enemy_team}_mm_{eslot}_norm_x", np.array([np.nan]))[frame_idx]
-                eny = data.get(f"{enemy_team}_mm_{eslot}_norm_y", np.array([np.nan]))[frame_idx]
-                if np.isnan(enx) or np.isnan(eny):
-                    continue
-                dist = ((nx - enx) ** 2 + (ny - eny) ** 2) ** 0.5
-                if dist < contact_dist and dist < best_dist:
-                    best_dist = dist
-                    best_enemy = (enx, eny)
-
-            if best_enemy is not None:
-                # Contact position = at the hero who took damage
-                cx, cy = _to_pixel(nx, ny)
-                intensity = min(1.0, drop / 0.3)
-                contacts.append({
-                    "pos": (cx, cy),
-                    "intensity": intensity,
-                    "team": team,
-                    "drop": round(drop, 3),
-                    "frame": frame_idx,
-                })
+        if best_enemy is not None:
+            cx, cy = _to_pixel(nx, ny)
+            intensity = min(1.0, drop / 0.3)
+            contacts.append({
+                "pos": (cx, cy),
+                "intensity": intensity,
+                "team": team,
+                "drop": round(drop, 3),
+                "frame": frame_idx,
+            })
 
     return contacts
 
@@ -569,22 +566,20 @@ def load_data(parquet_path: str) -> dict:
 
     data["num_frames"] = len(data["frame_idx"])
 
-    for team in ("blue", "red"):
-        for slot in range(1, 6):
-            prefix = f"{team}_mm_{slot}"
-            for attr in ("norm_x", "norm_y", "name", "confidence"):
-                col = f"{prefix}_{attr}"
-                if col in columns:
-                    arr = table.column(col).to_pylist()
-                    if attr in ("norm_x", "norm_y", "confidence"):
-                        data[col] = np.array(arr, dtype=np.float64)
-                    else:
-                        data[col] = np.array([(s or "") for s in arr], dtype=object)
+    for slot in range(1, 11):
+        for attr in ("norm_x", "norm_y", "name", "confidence", "team"):
+            col = f"mm_{slot}_{attr}"
+            if col in columns:
+                arr = table.column(col).to_pylist()
+                if attr in ("norm_x", "norm_y", "confidence"):
+                    data[col] = np.array(arr, dtype=np.float64)
                 else:
-                    if attr in ("norm_x", "norm_y", "confidence"):
-                        data[col] = np.full(data["num_frames"], np.nan, dtype=np.float64)
-                    else:
-                        data[col] = np.full(data["num_frames"], "", dtype=object)
+                    data[col] = np.array([(s or "") for s in arr], dtype=object)
+            else:
+                if attr in ("norm_x", "norm_y", "confidence"):
+                    data[col] = np.full(data["num_frames"], np.nan, dtype=np.float64)
+                else:
+                    data[col] = np.full(data["num_frames"], "", dtype=object)
 
     # Jungle (limited support)
     for j in range(1, 16):
@@ -598,14 +593,13 @@ def load_data(parquet_path: str) -> dict:
                     data[col] = np.array([(s or "") for s in arr], dtype=object)
 
     # ── Hero HP data (for contact detection) ──
-    for team in ("blue", "red"):
-        for slot in range(1, 6):
-            col = f"{team}_hero_{slot}_hp_pct"
-            if col in columns:
-                arr = table.column(col).to_pylist()
-                data[col] = np.array(arr, dtype=np.float64)
-            else:
-                data[col] = np.full(data["num_frames"], np.nan, dtype=np.float64)
+    for slot in range(1, 11):
+        col = f"hero_{slot}_hp_pct"
+        if col in columns:
+            arr = table.column(col).to_pylist()
+            data[col] = np.array(arr, dtype=np.float64)
+        else:
+            data[col] = np.full(data["num_frames"], np.nan, dtype=np.float64)
 
     log.info("Loaded %d frames from %s", data["num_frames"], parquet_path)
     return data
@@ -744,26 +738,28 @@ def main():
             _draw_contact_effects(canvas, active_contacts)
 
         # ── Draw hero dots ──
-        for team, dot_color, glow_color in [
-            ("blue", BLUE_DOT, BLUE_GLOW),
-            ("red", RED_DOT, RED_GLOW),
-        ]:
-            for slot in range(1, 6):
-                nx = data.get(f"{team}_mm_{slot}_norm_x", np.array([np.nan]))[idx]
-                ny = data.get(f"{team}_mm_{slot}_norm_y", np.array([np.nan]))[idx]
-                name = str(data.get(f"{team}_mm_{slot}_name", np.array([""]))[idx])
-                conf = data.get(f"{team}_mm_{slot}_confidence", np.array([np.nan]))[idx]
+        for slot in range(1, 11):
+            nx = data.get(f"mm_{slot}_norm_x", np.array([np.nan]))[idx]
+            ny = data.get(f"mm_{slot}_norm_y", np.array([np.nan]))[idx]
+            name = str(data.get(f"mm_{slot}_name", np.array([""]))[idx])
+            conf = data.get(f"mm_{slot}_confidence", np.array([np.nan]))[idx]
+            team = str(data.get(f"mm_{slot}_team", np.array([""]))[idx])
 
-                if np.isnan(nx) or np.isnan(ny):
-                    continue
+            if np.isnan(nx) or np.isnan(ny):
+                continue
 
-                px, py = _to_pixel(nx, ny)
-                display_name = name if name and name != "nan" else None
-                display_conf = float(conf) if not np.isnan(conf) else None
+            px, py = _to_pixel(nx, ny)
+            display_name = name if name and name != "nan" else None
+            display_conf = float(conf) if not np.isnan(conf) else None
 
-                _draw_dot(canvas, px, py, dot_color, glow_color,
-                          display_name, display_conf,
-                          show_labels=toggles["labels"])
+            if team == "red":
+                dot_color, glow_color = RED_DOT, RED_GLOW
+            else:
+                dot_color, glow_color = BLUE_DOT, BLUE_GLOW  # default blue
+
+            _draw_dot(canvas, px, py, dot_color, glow_color,
+                      display_name, display_conf,
+                      show_labels=toggles["labels"])
 
         # ── Jungle dots ──
         if toggles["jungle"]:
@@ -817,18 +813,17 @@ def main():
 
             # Update trails (sample every 5 frames, per-hero)
             if toggles["trails"] and frame_idx % 5 == 0:
-                for team, prefix in [("blue", "b"), ("red", "r")]:
-                    for slot in range(1, 6):
-                        nx = data.get(f"{team}_mm_{slot}_norm_x", np.array([np.nan]))[frame_idx]
-                        ny = data.get(f"{team}_mm_{slot}_norm_y", np.array([np.nan]))[frame_idx]
-                        if np.isnan(nx) or np.isnan(ny):
-                            continue
-                        key = f"{prefix}{slot}"
-                        if key not in trails:
-                            trails[key] = []
-                        trails[key].append(_to_pixel(nx, ny))
-                        if len(trails[key]) > 50:
-                            trails[key] = trails[key][-50:]
+                for slot in range(1, 11):
+                    nx = data.get(f"mm_{slot}_norm_x", np.array([np.nan]))[frame_idx]
+                    ny = data.get(f"mm_{slot}_norm_y", np.array([np.nan]))[frame_idx]
+                    if np.isnan(nx) or np.isnan(ny):
+                        continue
+                    key = f"s{slot}"
+                    if key not in trails:
+                        trails[key] = []
+                    trails[key].append(_to_pixel(nx, ny))
+                    if len(trails[key]) > 50:
+                        trails[key] = trails[key][-50:]
 
         # ── Contact detection (before render, so rings appear immediately) ──
         if toggles["contacts"]:
@@ -845,9 +840,8 @@ def main():
                 active_contacts[:] = active_contacts[-50:]
 
         # Track HP history for next frame detection
-        for team in ("blue", "red"):
-            for slot in range(1, 6):
-                key = f"{team}_hero_{slot}_hp_pct"
+            for slot in range(1, 11):
+                key = f"hero_{slot}_hp_pct"
                 hp = data.get(key, np.array([np.nan]))[frame_idx]
                 if not np.isnan(hp):
                     prev_hp[key] = float(hp)

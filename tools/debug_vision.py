@@ -1361,8 +1361,8 @@ def main():
     ap.add_argument("--overlay", action="store_true", default=True,
                     help="Tampilkan status overlay (default: True)")
     ap.add_argument("--no-overlay", action="store_false", dest="overlay")
-    ap.add_argument("--speed", type=float, default=1.5,
-                    help="Speed multiplier (default: 1.5)")
+    ap.add_argument("--speed", type=float, default=2,
+                    help="Speed multiplier (default: 2)")
     a = ap.parse_args()
 
     BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -1527,7 +1527,7 @@ def main():
     layout_edit_mode = False  # editor mati default, tekan E untuk aktifkan
 
     detect_every = 45        # deteksi hero panel tiap 45 frame (~1.5s pada 30fps)
-    minimap_every = 1         # minimap tracking tiap frame (smooth; thread handle backpressure via queue maxsize=2)
+    minimap_every = 2       # minimap tracking tiap 5 frame (kurangi beban YOLO)
     frame_count = 0
 
     clean_frame = None  # snapshot saat pause
@@ -1639,8 +1639,9 @@ def main():
                 cv2.waitKey(0)
                 break
 
-            # Frame skipping untuk speed tinggi
+            # Frame skipping — skip frame biar sesuai speed
             skip_frames = int(speed_mult / 2) if speed_mult >= 4 else 0
+            skip_frames = min(skip_frames, 10)
             for _ in range(skip_frames):
                 r_skip = cap.grab()
                 if not r_skip:
