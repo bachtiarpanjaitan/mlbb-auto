@@ -57,7 +57,7 @@ AREA_MAX = 250
 # 4 skala saja (hemat CPU, cukup akurat untuk deteksi)
 ICON_SIZES = [16, 20, 24, 28]
 # Confidence threshold untuk template match dianggap valid
-MATCH_THRESHOLD = 0.28  # disesuaikan untuk recall & akurasi matching lebih tinggi
+MATCH_THRESHOLD = 0.60  # disesuaikan untuk recall & akurasi matching lebih tinggi
 # NMS overlap threshold (IoU)
 NMS_IOU_THRESHOLD = 0.3
 # Jarak minimum (pixel) antar deteksi untuk NMS

@@ -789,7 +789,8 @@ def draw_minimap_hero_overlay(frame: np.ndarray, status: dict[str, Any]):
 
     # Build lines
     lines: list[tuple[str, tuple[int, int, int]]] = []
-    lines.append(("🗺 MINIMAP HEROES", (100, 255, 200)))
+    thresh = status.get("_match_threshold", 0.28)
+    lines.append((f"🗺 MINIMAP HEROES (thresh={thresh:.2f})", (100, 255, 200)))
 
     # Always show roster status
     blue_complete = status.get("blue_team_complete", False)
@@ -1080,6 +1081,7 @@ _HELP_LINES = [
     ("c / C", "Save skill crops / Auto-collect skill data"),
     ("l / L", "Save locked / Auto-collect locked (stun/CC)"),
     ("t", "Toggle skill mode (CNN Model / CV Legacy)"),
+    (", / .", "Match threshold -0.05 / +0.05"),
     ("- / =", "Slow down / Speed up (0.5× step)"),
     ("Drag handles", "Move / resize regions"),
 ]
@@ -1733,6 +1735,7 @@ def main():
         current_status["_skill_collect"] = _auto_collect_skills or _auto_collect_locked
         current_status["_skill_collect_count"] = _auto_collect_count
         current_status["_skill_collect_locked"] = _auto_collect_locked
+        current_status["_match_threshold"] = detector_mgr.minimap_hero_tracker.match_threshold
         current_status["_speed"] = speed_mult
 
         # ── Auto-collect skill dataset (jika aktif, setiap ~1 detik) ──
@@ -1880,6 +1883,14 @@ def main():
             speed_mult = max(0.25, speed_mult - 0.5)
             frame_delay = _calc_delay(speed_mult)
             print(f"⏪ Speed: {speed_mult:.2f}x ({frame_delay}ms delay)")
+        if k == ord(","):  # Turunkan match threshold
+            t = detector_mgr.minimap_hero_tracker.match_threshold
+            detector_mgr.minimap_hero_tracker.match_threshold = max(0.05, t - 0.05)
+            print(f"🔽 Match threshold: {t:.2f} → {detector_mgr.minimap_hero_tracker.match_threshold:.2f}")
+        if k == ord("."):  # Naikkan match threshold
+            t = detector_mgr.minimap_hero_tracker.match_threshold
+            detector_mgr.minimap_hero_tracker.match_threshold = min(0.95, t + 0.05)
+            print(f"🔼 Match threshold: {t:.2f} → {detector_mgr.minimap_hero_tracker.match_threshold:.2f}")
         if k == ord("z"):
             # Debug: print crop results for all regions
             for path, reg in layout.enumerate_regions():
