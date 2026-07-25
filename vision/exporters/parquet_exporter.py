@@ -118,7 +118,7 @@ for j in range(1, 16):
 
 # Jungle camp status — 15 fixed camps
 JUNGLE_CAMP_IDS = [
-    "lord_pit", "turtle_pit",
+    "legend_top", "legend_bot",
     "blue_buff_blue", "red_buff_blue", "blue_buff_red", "red_buff_red",
     "litho_center",
     "crab_top", "crab_bot",
@@ -126,19 +126,41 @@ JUNGLE_CAMP_IDS = [
     "beetle_blue", "beetle_red",
     "lizard_blue", "lizard_red",
 ]
+
+# Fixed camp positions (from manual label averages)
+JUNGLE_CAMP_POSITIONS = {
+    "legend_top": (113/350, 96/340),
+    "legend_bot": (241/350, 241/340),
+    "blue_buff_blue": (91/350, 175/340),
+    "red_buff_blue": (187/350, 72/340),
+    "blue_buff_red": (263/350, 162/340),
+    "red_buff_red": (165/350, 264/340),
+    "litho_center": (139/350, 132/340),
+    "crab_top": (69/350, 88/340),
+    "crab_bot": (282/350, 249/340),
+    "golem_blue": (174/350, 89/340),
+    "golem_red": (179/350, 247/340),
+    "beetle_blue": (134/350, 61/340),
+    "beetle_red": (218/350, 276/340),
+    "lizard_blue": (62/350, 144/340),
+    "lizard_red": (290/350, 192/340),
+}
+
 for cid in JUNGLE_CAMP_IDS:
-    FRAME_COLUMNS.append(f"jungle_{cid}_status")
+    FRAME_COLUMNS += [
+        f"jungle_{cid}_norm_x",
+        f"jungle_{cid}_norm_y",
+        f"jungle_{cid}_status",
+    ]
 
 # Towers
 FRAME_COLUMNS += [
-    "blue_towers_alive",
-    "red_towers_alive",
+    "towers_alive",
 ]
 
 # Objectives
 FRAME_COLUMNS += [
-    "lord_timer",
-    "turtle_timer",
+    "legend_timer",
 ]
 
 
@@ -189,17 +211,19 @@ def _flatten_status(
         if skey == "battle_spell":
             row["battle_spell_name"] = s.get("spell_name")
 
-    # ── Blue / Red team roster ──
+    # ── Team roster (hero slots 1-10, no blue/red split) ──
+    all_heroes = []
     for team, team_key in [("blue", "blue_team_heroes"), ("red", "red_team_heroes")]:
-        heroes = status.get(team_key) or []
-        row[f"{team}_team_complete"] = status.get(f"{team}_team_complete", False)
-        for h in heroes:
-            slot = h.get("slot")
-            if slot and 1 <= slot <= 5:
-                row[f"{team}_hero_{slot}_name"] = h.get("name")
-                row[f"{team}_hero_{slot}_hp_pct"] = h.get("hp_pct")
+        for h in (status.get(team_key) or []):
+            h["team"] = team
+            all_heroes.append(h)
+    row["team_complete"] = len(all_heroes) == 10
+    for slot, h in enumerate(all_heroes[:10], 1):
+        row[f"hero_{slot}_name"] = h.get("name")
+        row[f"hero_{slot}_team"] = h.get("team")
+        row[f"hero_{slot}_hp_pct"] = h.get("hp_pct")
 
-    # ── Match info (dari future top_bar detector) ──
+    # ── Match info ──
     row["match_time"] = status.get("match_time")
     row["match_elapsed_sec"] = status.get("match_elapsed_sec")
     score = status.get("team_score")
@@ -208,33 +232,21 @@ def _flatten_status(
     row["gold_blue"] = status.get("gold_blue")
     row["gold_red"] = status.get("gold_red")
 
-    # ── Minimap heroes ──
+    # ── Minimap heroes (10 hero, no blue/red split) ──
     mm_heroes = status.get("minimap_heroes") or []
-    blue_mm = [h for h in mm_heroes if h.get("team") == "blue"]
-    red_mm = [h for h in mm_heroes if h.get("team") == "red"]
+    all_mm = [h for h in mm_heroes if h.get("team") in ("blue", "red")]
     jungle_mm = [h for h in mm_heroes if h.get("team") == "jungle"]
 
-    for slot in range(1, 6):
-        if slot <= len(blue_mm):
-            h = blue_mm[slot - 1]
-            row[f"blue_mm_{slot}_name"] = h.get("name")
-            row[f"blue_mm_{slot}_norm_x"] = h.get("norm_x")
-            row[f"blue_mm_{slot}_norm_y"] = h.get("norm_y")
-            row[f"blue_mm_{slot}_game_x"] = h.get("game_x")
-            row[f"blue_mm_{slot}_game_y"] = h.get("game_y")
-            row[f"blue_mm_{slot}_confidence"] = h.get("confidence")
-            row[f"blue_mm_{slot}_region"] = h.get("region")
-            row[f"blue_mm_{slot}_lane"] = h.get("lane")
-        if slot <= len(red_mm):
-            h = red_mm[slot - 1]
-            row[f"red_mm_{slot}_name"] = h.get("name")
-            row[f"red_mm_{slot}_norm_x"] = h.get("norm_x")
-            row[f"red_mm_{slot}_norm_y"] = h.get("norm_y")
-            row[f"red_mm_{slot}_game_x"] = h.get("game_x")
-            row[f"red_mm_{slot}_game_y"] = h.get("game_y")
-            row[f"red_mm_{slot}_confidence"] = h.get("confidence")
-            row[f"red_mm_{slot}_region"] = h.get("region")
-            row[f"red_mm_{slot}_lane"] = h.get("lane")
+    for slot, h in enumerate(all_mm[:10], 1):
+        row[f"mm_{slot}_name"] = h.get("name")
+        row[f"mm_{slot}_team"] = h.get("team")
+        row[f"mm_{slot}_norm_x"] = h.get("norm_x")
+        row[f"mm_{slot}_norm_y"] = h.get("norm_y")
+        row[f"mm_{slot}_game_x"] = h.get("game_x")
+        row[f"mm_{slot}_game_y"] = h.get("game_y")
+        row[f"mm_{slot}_confidence"] = h.get("confidence")
+        row[f"mm_{slot}_region"] = h.get("region")
+        row[f"mm_{slot}_lane"] = h.get("lane")
 
     # Jungle objectives (max 15)
     for j in range(1, 16):
@@ -246,18 +258,18 @@ def _flatten_status(
             row[f"jungle_{j}_game_x"] = h.get("game_x")
             row[f"jungle_{j}_game_y"] = h.get("game_y")
 
-    # ── Jungle camp status (15 fixed camps) ──
+    # ── Jungle camp positions (fixed) + status ──
     jungle_status = status.get("jungle_status", {}) or {}
     for cid in JUNGLE_CAMP_IDS:
+        row[f"jungle_{cid}_norm_x"] = JUNGLE_CAMP_POSITIONS.get(cid, (None, None))[0]
+        row[f"jungle_{cid}_norm_y"] = JUNGLE_CAMP_POSITIONS.get(cid, (None, None))[1]
         row[f"jungle_{cid}_status"] = jungle_status.get(cid, "unknown")
 
     # ── Towers ──
-    row["blue_towers_alive"] = status.get("blue_towers_alive")
-    row["red_towers_alive"] = status.get("red_towers_alive")
+    row["towers_alive"] = (status.get("blue_towers_alive") or 0) + (status.get("red_towers_alive") or 0)
 
     # ── Objectives ──
-    row["lord_timer"] = status.get("lord_timer")
-    row["turtle_timer"] = status.get("turtle_timer")
+    row["legend_timer"] = status.get("lord_timer") or status.get("turtle_timer")
 
     return row
 

@@ -1,10 +1,10 @@
 """
 YOLOv11n Detector — MLBB Minimap Detection
 Mendeteksi 11 class:
-  0  = blue_hero
-  1  = red_hero
-  2  = lord            (1 lokasi)
-  3  = turtle          (1 lokasi)
+  0  = hero
+  
+  1  = legend          (2 pit)
+  
   4  = thunder_fenrir  (2 lokasi: blue buff di kedua sisi)
   5  = molten_fiend    (2 lokasi: red buff di kedua sisi)
   6  = lithowanderer   (1 lokasi)
@@ -29,19 +29,17 @@ import numpy as np
 logger = logging.getLogger("mlbb.vision.yolo_detector")
 
 
-# ── Class ID mapping ────────────────────────────────────────────────────────
+# ── Class ID mapping (9-class model) ────────────────────────────────────────
 YOLO_CLASS_MAP: dict[int, tuple[str, str | None]] = {
-    0:  ("blue",   None),
-    1:  ("red",    None),
-    2:  ("jungle", "lord"),
-    3:  ("jungle", "turtle"),
-    4:  ("jungle", "thunder_fenrir"),
-    5:  ("jungle", "molten_fiend"),
-    6:  ("jungle", "lithowanderer"),
-    7:  ("jungle", "crab"),
-    8:  ("jungle", "lava_golem"),
-    9:  ("jungle", "fire_beetle"),
-    10: ("jungle", "horned_lizard"),
+    0:  ("hero",   None),            # hero — team assigned via roster later
+    1:  ("jungle", "legend"),
+    2:  ("jungle", "thunder_fenrir"),
+    3:  ("jungle", "molten_fiend"),
+    4:  ("jungle", "lithowanderer"),
+    5:  ("jungle", "crab"),
+    6:  ("jungle", "lava_golem"),
+    7:  ("jungle", "fire_beetle"),
+    8:  ("jungle", "horned_lizard"),
 }
 
 NUM_CLASSES = len(YOLO_CLASS_MAP)
@@ -64,7 +62,7 @@ class YOLOMinimapDetector:
     def __init__(
         self,
         model_path: str | Path = "models/hero_tracker.onnx",
-        conf_threshold: float = 0.35,
+        conf_threshold: float = 0.15,
         iou_threshold: float = 0.5,
     ):
         self.model_path = Path(model_path)

@@ -70,21 +70,22 @@ SCORE_BORDER_WEIGHT = 0.15
 # ── Fixed Jungle Camps Registry (Koordinat Tetap Kamp Jungle di Minimap MLBB) ──
 # Land of Dawn minimap normalized 0-1 coordinates for static jungle objectives
 JUNGLE_CAMPS = [
-    {"id": "lord_pit", "name": "lord", "norm_x": 0.50, "norm_y": 0.22, "radius": 0.08},
-    {"id": "turtle_pit", "name": "turtle", "norm_x": 0.50, "norm_y": 0.78, "radius": 0.08},
-    {"id": "blue_buff_blue", "name": "thunder_fenrir", "norm_x": 0.28, "norm_y": 0.44, "radius": 0.07},
-    {"id": "red_buff_blue", "name": "molten_fiend", "norm_x": 0.38, "norm_y": 0.72, "radius": 0.07},
-    {"id": "blue_buff_red", "name": "thunder_fenrir", "norm_x": 0.72, "norm_y": 0.56, "radius": 0.07},
-    {"id": "red_buff_red", "name": "molten_fiend", "norm_x": 0.62, "norm_y": 0.28, "radius": 0.07},
-    {"id": "litho_center", "name": "lithowanderer", "norm_x": 0.50, "norm_y": 0.50, "radius": 0.07},
-    {"id": "crab_top", "name": "crab", "norm_x": 0.22, "norm_y": 0.22, "radius": 0.07},
-    {"id": "crab_bot", "name": "crab", "norm_x": 0.78, "norm_y": 0.78, "radius": 0.07},
-    {"id": "golem_blue", "name": "lava_golem", "norm_x": 0.22, "norm_y": 0.58, "radius": 0.07},
-    {"id": "golem_red", "name": "lava_golem", "norm_x": 0.78, "norm_y": 0.42, "radius": 0.07},
-    {"id": "beetle_blue", "name": "fire_beetle", "norm_x": 0.42, "norm_y": 0.84, "radius": 0.07},
-    {"id": "beetle_red", "name": "fire_beetle", "norm_x": 0.58, "norm_y": 0.16, "radius": 0.07},
-    {"id": "lizard_blue", "name": "horned_lizard", "norm_x": 0.18, "norm_y": 0.40, "radius": 0.07},
-    {"id": "lizard_red", "name": "horned_lizard", "norm_x": 0.82, "norm_y": 0.60, "radius": 0.07},
+    # Positions in minimap pixel coords (from manual labels)
+    {"id": "legend_top", "name": "legend", "norm_x": 113/350, "norm_y": 96/340, "radius": 0.08},
+    {"id": "legend_bot", "name": "legend", "norm_x": 241/350, "norm_y": 241/340, "radius": 0.08},
+    {"id": "blue_buff_blue", "name": "thunder_fenrir", "norm_x": 91/350, "norm_y": 175/340, "radius": 0.07},
+    {"id": "red_buff_blue", "name": "molten_fiend", "norm_x": 187/350, "norm_y": 72/340, "radius": 0.07},
+    {"id": "blue_buff_red", "name": "thunder_fenrir", "norm_x": 263/350, "norm_y": 162/340, "radius": 0.07},
+    {"id": "red_buff_red", "name": "molten_fiend", "norm_x": 165/350, "norm_y": 264/340, "radius": 0.07},
+    {"id": "litho_center", "name": "lithowanderer", "norm_x": 139/350, "norm_y": 132/340, "radius": 0.07},
+    {"id": "crab_top", "name": "crab", "norm_x": 69/350, "norm_y": 88/340, "radius": 0.07},
+    {"id": "crab_bot", "name": "crab", "norm_x": 282/350, "norm_y": 249/340, "radius": 0.07},
+    {"id": "golem_blue", "name": "lava_golem", "norm_x": 174/350, "norm_y": 89/340, "radius": 0.07},
+    {"id": "golem_red", "name": "lava_golem", "norm_x": 179/350, "norm_y": 247/340, "radius": 0.07},
+    {"id": "beetle_blue", "name": "fire_beetle", "norm_x": 134/350, "norm_y": 61/340, "radius": 0.07},
+    {"id": "beetle_red", "name": "fire_beetle", "norm_x": 218/350, "norm_y": 276/340, "radius": 0.07},
+    {"id": "lizard_blue", "name": "horned_lizard", "norm_x": 62/350, "norm_y": 144/340, "radius": 0.07},
+    {"id": "lizard_red", "name": "horned_lizard", "norm_x": 290/350, "norm_y": 192/340, "radius": 0.07},
 ]
 
 
@@ -1233,9 +1234,13 @@ class MinimapHeroTracker:
                 nx = cx / max(1, self._mm_w)
                 ny = cy / max(1, self._mm_h)
 
-                # Priority 1: YOLO class name (most accurate)
+                # Priority 1: YOLO class name + snap ke fixed position
                 if jungle_name is not None:
-                    target_nx, target_ny = nx, ny
+                    camp = self._find_matching_camp(nx, ny, name_filter=jungle_name)
+                    if camp:
+                        target_nx, target_ny = camp["norm_x"], camp["norm_y"]
+                    else:
+                        target_nx, target_ny = nx, ny
                     jobj.name = jungle_name
                     jobj.confidence = 0.90
                 else:
@@ -1396,7 +1401,7 @@ class MinimapHeroTracker:
             best_dist = self.match_distance
             best_idx = -1
             for i, (team, _jn, cx, cy, r) in enumerate(all_dots):
-                if i in used_dots or team != hero.team:
+                if i in used_dots or (team != hero.team and team != "hero"):
                     continue
                 nx, ny = cx / max(1, self._mm_w), cy / max(1, self._mm_h)
                 dist = ((nx - hero.norm_x) ** 2 + (ny - hero.norm_y) ** 2) ** 0.5
@@ -1429,7 +1434,10 @@ class MinimapHeroTracker:
             gray_eq = clahe.apply(gray)
 
             for team, cx, cy, r in remaining_dots:
-                team_heroes = [n for n, t in self._roster.items() if t == team]
+                if team == "hero":
+                    team_heroes = list(self._roster.keys())  # YOLO hero → coba semua roster
+                else:
+                    team_heroes = [n for n, t in self._roster.items() if t == team]
                 if not team_heroes:
                     continue
 
@@ -1488,14 +1496,21 @@ class MinimapHeroTracker:
             if h.name and h.name not in matched_names and h.miss_count < self.max_miss_frames
         ]
         if unmatched_tracked:
-            for team in ("blue", "red"):
-                avail = [(cx, cy) for t, _jn, cx, cy, r in all_dots if t == team
-                         and not any(abs(cx - int(mh.norm_x*self._mm_w)) < NMS_DISTANCE_THRESHOLD
-                                     and abs(cy - int(mh.norm_y*self._mm_h)) < NMS_DISTANCE_THRESHOLD
-                                     for mn in matched_names for mh in [self._tracked.get(mn)] if mh)]
+            for team in ("blue", "red", "hero"):
+                if team == "hero":
+                    avail = [(cx, cy) for t, _jn, cx, cy, r in all_dots
+                             if t in ("blue", "red", "hero")
+                             and not any(abs(cx - int(mh.norm_x*self._mm_w)) < NMS_DISTANCE_THRESHOLD
+                                         and abs(cy - int(mh.norm_y*self._mm_h)) < NMS_DISTANCE_THRESHOLD
+                                         for mn in matched_names for mh in [self._tracked.get(mn)] if mh)]
+                else:
+                    avail = [(cx, cy) for t, _jn, cx, cy, r in all_dots if t == team
+                             and not any(abs(cx - int(mh.norm_x*self._mm_w)) < NMS_DISTANCE_THRESHOLD
+                                         and abs(cy - int(mh.norm_y*self._mm_h)) < NMS_DISTANCE_THRESHOLD
+                                         for mn in matched_names for mh in [self._tracked.get(mn)] if mh)]
                 if not avail:
                     continue
-                nn = self._nearest_neighbor_match(avail, [h for h in unmatched_tracked if h.team == team],
+                nn = self._nearest_neighbor_match(avail, [h for h in unmatched_tracked if h.team in (team, "hero")],
                                                   self.match_distance, self.match_distance * 3)
                 for key, (px, py) in nn.items():
                     h = self._tracked.get(key)
@@ -1515,8 +1530,13 @@ class MinimapHeroTracker:
                                      for mn in matched_names for mh in [self._tracked.get(mn)] if mh):
                 continue
             
-            # Roster elimination: jika hanya ada 1 hero di roster tim yang belum matched, assign ke hero tersebut
-            unassigned_team = [n for n in self._roster_unassigned if self._roster.get(n) == team]
+            # Roster elimination: jika hanya ada 1 hero di roster yang belum matched, assign ke hero tersebut
+            if team == "hero":
+                # YOLO team="hero" → coba cocokkan ke blue atau red roster
+                unassigned_team = [n for n in self._roster_unassigned
+                                   if self._roster.get(n) in ("blue", "red")]
+            else:
+                unassigned_team = [n for n in self._roster_unassigned if self._roster.get(n) == team]
             if len(unassigned_team) == 1:
                 name = unassigned_team[0]
                 self._roster_unassigned.discard(name)
@@ -1553,7 +1573,7 @@ class MinimapHeroTracker:
 
         blue_dots = [(cx, cy) for t, _jn, cx, cy, r in all_dots if t == "blue"]
         red_dots = [(cx, cy) for t, _jn, cx, cy, r in all_dots if t == "red"]
-        jungle_dots_debug = [(cx, cy) for t, _jn, cx, cy, r in jungle_dots]
+        jungle_dots_debug = []
 
         for h in self._tracked.values():
             if h.miss_count < self.max_miss_frames:
@@ -1563,12 +1583,11 @@ class MinimapHeroTracker:
                 elif h.team == "red" and (px, py) not in red_dots:
                     red_dots.append((px, py))
 
-        # Add tracked jungle positions to debug
+        # Jungle dots from tracked positions only (fixed, no jitter)
         for j in self._tracked_jungle.values():
             if j.miss_count < self.max_miss_frames:
                 px, py = int(j.norm_x * ww), int(j.norm_y * hh)
-                if (px, py) not in jungle_dots_debug:
-                    jungle_dots_debug.append((px, py))
+                jungle_dots_debug.append((px, py))
 
         bm = np.zeros((hh, ww), dtype=np.uint8)
         rm = np.zeros((hh, ww), dtype=np.uint8)

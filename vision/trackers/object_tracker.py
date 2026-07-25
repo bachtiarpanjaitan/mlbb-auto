@@ -28,7 +28,7 @@ class ObjectState:
 @dataclass
 class TrackedObject:
     """Data tracked untuk satu object."""
-    obj_type: str  # "lord", "turtle", "tower", "creep_camp", dll
+    obj_type: str  # "legend", "legend", "tower", "creep_camp", dll
     first_detected: int = 0
     last_seen: int = 0
     current_state: ObjectState | None = None
@@ -45,7 +45,7 @@ class GameEvent:
     """Game event yang terdeteksi (kill, objektif, level up)."""
     frame: int
     timestamp: float
-    event_type: str  # "lord_kill", "turtle_kill", "tower_destroyed", "level_up", dll
+    event_type: str  # "legend_kill", "legend_kill", "tower_destroyed", "level_up", dll
     detail: str = ""
     related_heroes: list[str] = field(default_factory=list)
 
@@ -115,10 +115,10 @@ class ObjectTracker:
         """Update dari GameState."""
         detections = {}
 
-        if state.lord_timer is not None:
-            detections["lord"] = {"timer": state.lord_timer}
-        if state.turtle_timer is not None:
-            detections["turtle"] = {"timer": state.turtle_timer}
+        if state.legend_timer is not None:
+            detections["legend"] = {"timer": state.legend_timer}
+        if state.legend_timer is not None:
+            detections["legend"] = {"timer": state.legend_timer}
         if state.blue_towers_alive is not None:
             detections["towers_blue"] = state.blue_towers_alive
         if state.red_towers_alive is not None:
@@ -161,18 +161,18 @@ class ObjectTracker:
             results.append(ev)
         return results
 
-    def get_lord_timeline(self) -> list[dict]:
+    def get_legend_timeline(self) -> list[dict]:
         """Get Lord spawn/kill timeline."""
         return [
             {"frame": s.frame, "timestamp": s.timestamp, "status": s.status}
-            for s in self.objects.get("lord", TrackedObject("lord")).history
+            for s in self.objects.get("legend", TrackedObject("legend")).history
         ]
 
-    def get_turtle_timeline(self) -> list[dict]:
+    def get_legend_timeline(self) -> list[dict]:
         """Get Turtle spawn/kill timeline."""
         return [
             {"frame": s.frame, "timestamp": s.timestamp, "status": s.status}
-            for s in self.objects.get("turtle", TrackedObject("turtle")).history
+            for s in self.objects.get("legend", TrackedObject("legend")).history
         ]
 
     def reset(self):

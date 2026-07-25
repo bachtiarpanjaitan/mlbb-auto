@@ -24,11 +24,10 @@ from vision.ocr.reader import OCRReader
 from vision.detectors import HPDetector, ManaDetector, LevelDetector, GoldDetector
 from vision.detectors import SkillsDetector
 from vision.matcher.template import TemplateMatcher
-from vision.detectors.team.blue_team import BlueTeamDetector, RedTeamDetector, create_red_team_detector
+from vision.detectors.team.blue_team import BlueTeamDetector, RedTeamDetector
 from vision.detectors.minimap.minimap_hero_tracker import MinimapHeroTracker
 from vision.mapper.coordinate_mapper import CoordinateMapper
 from vision.trackers.team_hp_tracker import TeamHPTracker, create_team_hp_tracker
-from vision.core.frame_reader import FrameReader
 from vision.exporters import GameStateExporter
 from pathlib import Path
 import json
@@ -572,75 +571,8 @@ class DetectorManager:
             pass
         return None
 
-    def _get_base_cooldown(self, skill_name: str) -> float | None:
-        """Cari base cooldown dari database hero atau battle spell."""
-        # Battle spell — pake spell yang sudah teridentifikasi
-        if skill_name == "battle_spell":
-            if self._cached_spell_cd is not None:
-                return self._cached_spell_cd
-            # Cek dari spells.json dulu
-            if self._cached_spell_key:
-                entry = self._spell_db.get(self._cached_spell_key)
-                if entry and entry.get("cooldown"):
-                    return float(entry["cooldown"])
-                if self._cached_spell_key in self._BATTLE_SPELL_CDS:
-                    return self._BATTLE_SPELL_CDS[self._cached_spell_key]
-            return 90.0  # fallback default
-
-        if skill_name in self._BATTLE_SPELL_CDS:
-            return self._BATTLE_SPELL_CDS[skill_name]
-
-        # Hero skill → cari di database
-        if not self._cached_hero_name:
-            return None
-
-        # Map skill_3 → ultimate (di database pake "ultimate")
-        db_key = {"skill_3": "ultimate"}.get(skill_name, skill_name)
-
-        hero_key = self._hero_key_from_name(self._cached_hero_name)
-        if not hero_key or hero_key not in self._hero_db:
-            return None
-
-        hero = self._hero_db[hero_key]
-        skill_data = hero.get("skills", {}).get(db_key, {})
-        levels = skill_data.get("levels", {})
-        cooldowns = levels.get("cooldown", [])
-        if cooldowns:
-            return cooldowns[0]  # level 1 = cooldown paling panjang
-        return skill_data.get("cooldown")
-
-    def _get_skill_unlock_level(self, skill_name: str) -> int:
-        """
-        Tentukan level hero saat skill ini terbuka.
-
-        Baca dari `unlock_level` di heroes.json.
-        """
-        # Map layout skill_name → database key
-        db_key = {"skill_3": "ultimate", "skill_4": "special_skill"}.get(skill_name, skill_name)
-
-        # passive, battle_spell → level 1
-        if db_key in ("passive", "battle_spell"):
-            return 1
-        if db_key not in ("ultimate", "special_skill", "skill_1", "skill_2"):
-            return 1
-
-        # Cek dari database hero
-        if not self._cached_hero_name:
-            return 1 if db_key not in ("ultimate", "special_skill") else 4
-
-        hero_key = self._hero_key_from_name(self._cached_hero_name)
-        if not hero_key or hero_key not in self._hero_db:
-            return 1 if db_key not in ("ultimate", "special_skill") else 4
-
-        hero = self._hero_db.get(hero_key, {})
-        skill_data = hero.get("skills", {}).get(db_key, {})
-        unlock_lvl = skill_data.get("unlock_level")
-        if unlock_lvl is not None:
-            return int(unlock_lvl)
-
-        # Fallback
-        return 4 if db_key in ("ultimate", "special_skill") else 1
-
+    
+    
     def _hero_key_from_name(self, hero_name: str) -> str | None:
         """Convert hero display name → database key."""
         for key, hero in self._hero_db.items():
@@ -648,77 +580,7 @@ class DetectorManager:
                 return key
         return None
 
-    def capture_skill_references(self, frame: np.ndarray):
-        """
-        Capture reference images untuk tiap skill — hanya saat brightness
-        mengindikasikan skill dalam kondisi ready (tidak cooldown).
-        """
-        for skill_name in ("passive", "skill_1", "skill_2", "skill_3", "skill_4", "battle_spell"):
-            if hasattr(self, '_cd_ref_images') and skill_name in self._cd_ref_images:
-                continue
-            img = crop_region(frame, "hero_panel", "skills", skill_name)
-            if img is None or not img.size:
-                continue
-            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            if gray.mean() < 100:  # only capture when bright (ready state)
-                continue
-            if not hasattr(self, '_cd_ref_images'):
-                self._cd_ref_images = {}
-                self._cd_ref_brightness = {}
-            self._cd_ref_images[skill_name] = img.copy()
-            self._cd_ref_brightness[skill_name] = float(gray.mean())
-
-    def _check_cooldown_visual(self, skill_name: str, skill_img: np.ndarray) -> bool:
-        """
-        Deteksi cooldown via template matching vs reference image.
-        Center crop 10% tiap sisi (80% area dipakai) agar tetap reliable
-        di icon kecil seperti battle_spell (59x59).
-        """
-        if not hasattr(self, '_cd_ref_images'):
-            return False
-        ref = self._cd_ref_images.get(skill_name)
-        if ref is not None:
-            h, w = ref.shape[:2]
-            current = cv2.resize(skill_img, (w, h)) if skill_img.shape[:2] != (h, w) else skill_img
-            ref_g = cv2.cvtColor(ref, cv2.COLOR_BGR2GRAY) if ref.ndim == 3 else ref
-            cur_g = cv2.cvtColor(current, cv2.COLOR_BGR2GRAY) if current.ndim == 3 else current
-
-            # Crop 10% tiap sisi → 80% area tengah (sebelumnya 30% → 40% area)
-            margin = int(min(w, h) * 0.10)
-            ref_c = ref_g[margin:h-margin, margin:w-margin] if 2*margin < min(h,w) else ref_g
-            cur_c = cur_g[margin:h-margin, margin:w-margin] if 2*margin < min(h,w) else cur_g
-
-            corr = float(cv2.matchTemplate(ref_c, cur_c, cv2.TM_CCOEFF_NORMED)[0][0])
-            return corr < 0.90
-        return False
-
-    def _try_read_cd_async(self, skill_name: str, skill_img: np.ndarray, video_time: float):
-        """Async CD reader — OCR-only.
-
-        Baca angka cooldown dari icon skill pake Tesseract.
-        Hasil disimpan di _cd_ocr_results untuk dipakai _update_skill_cooldown.
-        """
-        last = self._cd_ocr_last_time.get(skill_name, -999.0)
-        if video_time - last < self._CD_OCR_INTERVAL:
-            return
-        if self._cd_ocr_pending.get(skill_name, False):
-            return
-        self._cd_ocr_last_time[skill_name] = video_time
-        self._cd_ocr_pending[skill_name] = True
-        img_copy = skill_img.copy()
-
-        def _worker():
-            try:
-                cd_found = self._read_cd_tesseract(img_copy)
-                if cd_found is not None:
-                    # Simpan hasil OCR: remaining cooldown dalam detik
-                    self._cd_ocr_results[skill_name] = (video_time, cd_found)
-            except Exception:
-                pass
-            self._cd_ocr_pending[skill_name] = False
-
-        self._cd_ocr_executor.submit(_worker)
-
+    
     def _update_skill_cooldown(self, skill_name: str, skill_img: np.ndarray | None,
                                skill_info: dict[str, Any], video_time: float = 0):
         """
@@ -862,10 +724,10 @@ def draw_minimap_heroes(frame: np.ndarray, status: dict[str, Any],
         return
 
     fs = 0.55
-    thick_circle = 2
+    thick_circle = 1
     thick_text = 1
-    dot_r = 10
-    glow_r = 16
+    dot_r = 6
+    glow_r = 11
 
     for entry in heroes:
         px = mm_x + entry.get("pixel_x", 0)
@@ -878,10 +740,7 @@ def draw_minimap_heroes(frame: np.ndarray, status: dict[str, Any],
             continue
         if px < mm_x or px > mm_x + mm_w or py < mm_y or py > mm_y + mm_h:
             continue
-        # Cek apakah identitas hero unknown
-        is_unknown = not name or name == "?" or str(name).lower().startswith("unknown")
-
-        if team == "blue":
+        if team in ("blue", "hero"):
             outer_color = (255, 140, 60)
             fill_color = (220, 80, 30)
         elif team == "red":
@@ -899,26 +758,25 @@ def draw_minimap_heroes(frame: np.ndarray, status: dict[str, Any],
         cv2.circle(frame, (px, py), dot_r, fill_color, -1)
         cv2.circle(frame, (px, py), max(2, dot_r // 2), (255, 255, 255), -1)
 
-        # Label teks hanya digambar jika identitas hero SUDAH diketahui (bukan unknown)
-        if not is_unknown:
-            if team == "jungle":
-                label = name if (name and not name.startswith("jungle")) else "jungle"
-            else:
-                label = name[:10]
-            extra = f" ({conf:.0%})" if conf < 0.8 else ""
-            text = f"{label}{extra}"
+        # Label teks — tampilkan nama hero atau "?" jika unknown
+        if team == "jungle":
+            label = name if (name and not name.startswith("jungle")) else "jungle"
+        else:
+            label = "?" if (not name or name.startswith("unknown")) else name[:12]
+        extra = f" ({conf:.0%})" if conf < 0.8 else ""
+        text = f"{label}{extra}"
 
-            (tw, th), bl = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, fs, thick_text)
-            lx = px + dot_r + 5
-            ly = py + th // 3
-            pad = 5
+        (tw, th), bl = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, fs, thick_text)
+        lx = px + dot_r + 5
+        ly = py + th // 3
+        pad = 5
 
-            cv2.rectangle(frame, (lx - pad, ly - th - pad), (lx + tw + pad, ly + pad),
-                          (0, 0, 0), -1)
-            cv2.rectangle(frame, (lx - pad, ly - th - pad), (lx + tw + pad, ly + pad),
-                          outer_color, 1)
-            cv2.putText(frame, text, (lx, ly), cv2.FONT_HERSHEY_SIMPLEX,
-                        fs, (255, 255, 255), thick_text, cv2.LINE_AA)
+        cv2.rectangle(frame, (lx - pad, ly - th - pad), (lx + tw + pad, ly + pad),
+                      (0, 0, 0), -1)
+        cv2.rectangle(frame, (lx - pad, ly - th - pad), (lx + tw + pad, ly + pad),
+                      outer_color, 1)
+        cv2.putText(frame, text, (lx, ly), cv2.FONT_HERSHEY_SIMPLEX,
+                    fs, (255, 255, 255), thick_text, cv2.LINE_AA)
 
 
 def draw_minimap_hero_overlay(frame: np.ndarray, status: dict[str, Any]):
