@@ -102,7 +102,7 @@ detectors:
       type: bar
       color: green
     portrait_hero_5:
-      bbox: [1008, 964, 69, 63]
+      bbox: [1003, 961, 75, 70]
       type: template
       templates: heroes
     hp_bar_hero_5:

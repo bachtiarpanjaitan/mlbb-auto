@@ -222,6 +222,7 @@ class MinimapHeroTracker:
     def __init__(
         self,
         max_miss_frames: int = 5,
+        max_miss_frames_unknown: int = 8,   # ≈0.5s untuk unknown dot
         match_distance: float = 0.06,
         smooth_alpha: float = 0.6,
         use_coordinate_mapper: bool = True,
@@ -233,6 +234,7 @@ class MinimapHeroTracker:
         yolo_model_path: str | Path | None = None,
     ):
         self.max_miss_frames = max_miss_frames
+        self.max_miss_frames_unknown = max_miss_frames_unknown
         self.match_distance = match_distance
         self.smooth_alpha = smooth_alpha
         self.match_threshold = match_threshold
@@ -1390,18 +1392,24 @@ class MinimapHeroTracker:
         matched_names: set[str] = set()
         used_dots: set[int] = set()  # indices of used dots in all_dots
 
-        # ── 2. Fast path: stable heroes -> NN match ──
-        stable_heroes = [
+        # ── 2. Fast path: tracked heroes (named + unknown) -> NN match ──
+        #     Unknown entries juga di-match biar gak dibuat ulang tiap frame.
+        tracked_to_match = [
             h for h in self._tracked.values()
-            if h.name and h.frames_alive >= 10
-            and h.confidence >= 0.7 and h.miss_count == 0
+            if h.miss_count < self.max_miss_frames
+            and h.frames_alive >= 2  # minimal 2 frame biar posisinya agak valid
         ]
+        # Sort: named + high confidence dulu, baru unknown
+        tracked_to_match.sort(key=lambda h: (
+            0 if (h.name and not h.name.startswith("unknown_")) else 1,
+            -h.confidence,
+        ))
 
-        for hero in stable_heroes:
+        for hero in tracked_to_match:
             best_dist = self.match_distance
             best_idx = -1
             for i, (team, _jn, cx, cy, r) in enumerate(all_dots):
-                if i in used_dots or (team != hero.team and team != "hero"):
+                if i in used_dots or (team != hero.team and team != "hero" and hero.team not in ("blue", "red")):
                     continue
                 nx, ny = cx / max(1, self._mm_w), cy / max(1, self._mm_h)
                 dist = ((nx - hero.norm_x) ** 2 + (ny - hero.norm_y) ** 2) ** 0.5
@@ -1412,7 +1420,7 @@ class MinimapHeroTracker:
             if best_idx >= 0:
                 _, _jn, cx, cy, r = all_dots[best_idx]
                 used_dots.add(best_idx)
-                matched_names.add(hero.name)
+                matched_names.add(hero.name or "")
 
                 nx, ny = self._normalize(cx, cy)
                 hero.smooth_position(nx, ny)
@@ -1421,9 +1429,11 @@ class MinimapHeroTracker:
                 hero.miss_count = 0
                 hero.confidence = min(1.0, hero.confidence + 0.01)
 
-        # ── 3. Sisa circles -> template matching untuk identity ──
+        # ── 3. Sisa circles → template matching untuk identity ──
+        #     PENTING: semua dot HARUS masuk tracking (unknown kalau gagal match).
+        #     Jangan pernah continue/skip dot — deteksi YOLO selalu valid.
         remaining_dots = [
-            (team, cx, cy, r) for i, (team, _jn, cx, cy, r) in enumerate(all_dots)
+            (i, team, cx, cy, r) for i, (team, _jn, cx, cy, r) in enumerate(all_dots)
             if i not in used_dots
         ]
 
@@ -1433,44 +1443,42 @@ class MinimapHeroTracker:
             clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(8, 8))
             gray_eq = clahe.apply(gray)
 
-            for team, cx, cy, r in remaining_dots:
+            for dot_idx, team, cx, cy, r in remaining_dots:
                 if team == "hero":
-                    team_heroes = list(self._roster.keys())  # YOLO hero → coba semua roster
+                    team_heroes = list(self._roster.keys())
                 else:
                     team_heroes = [n for n, t in self._roster.items() if t == team]
-                if not team_heroes:
-                    continue
-
-                half = max(16, max(self.icon_sizes) // 2 + 2)
-                px1, py1 = max(0, cx-half), max(0, cy-half)
-                px2, py2 = min(w, cx+half), min(h, cy+half)
-                patch = gray_eq[py1:py2, px1:px2]; ph, pw = patch.shape[:2]
-                if ph < 6 or pw < 6:
-                    continue
 
                 best_name = None; best_score = 0.0
 
-                for hero_name in team_heroes:
-                    templates = self._circle_templates.get(hero_name)
-                    if not templates: continue
-                    gray_tmpls = templates.get('gray', [])
-                    for scale_idx in range(len(self.icon_sizes)):
-                        if scale_idx >= len(gray_tmpls) or scale_idx >= len(self._circle_masks):
-                            continue
-                        tg, mask = gray_tmpls[scale_idx], self._circle_masks[scale_idx]
-                        th, tw = tg.shape[:2]
-                        if ph < th or pw < tw: continue
-                        result = cv2.matchTemplate(patch, tg, cv2.TM_CCOEFF_NORMED, mask=mask)
-                        max_val = float(np.max(result)) if result.size > 0 else 0.0
-                        if max_val > 0.01 and max_val > best_score:
-                            best_score, best_name = max_val, hero_name
+                if team_heroes:
+                    half = max(16, max(self.icon_sizes) // 2 + 2)
+                    px1, py1 = max(0, cx-half), max(0, cy-half)
+                    px2, py2 = min(w, cx+half), min(h, cy+half)
+                    patch = gray_eq[py1:py2, px1:px2]; ph, pw = patch.shape[:2]
+
+                    if ph >= 6 and pw >= 6:
+                        for hero_name in team_heroes:
+                            templates = self._circle_templates.get(hero_name)
+                            if not templates: continue
+                            gray_tmpls = templates.get('gray', [])
+                            for scale_idx in range(len(self.icon_sizes)):
+                                if scale_idx >= len(gray_tmpls) or scale_idx >= len(self._circle_masks):
+                                    continue
+                                tg, mask = gray_tmpls[scale_idx], self._circle_masks[scale_idx]
+                                th, tw = tg.shape[:2]
+                                if ph < th or pw < tw: continue
+                                result = cv2.matchTemplate(patch, tg, cv2.TM_CCOEFF_NORMED, mask=mask)
+                                max_val = float(np.max(result)) if result.size > 0 else 0.0
+                                if max_val > 0.01 and max_val > best_score:
+                                    best_score, best_name = max_val, hero_name
 
                 border_bonus = self._verify_border_color(minimap_img, cx, cy, team)
                 final_score = best_score + border_bonus if best_name else border_bonus
-                if final_score < self.match_threshold:
-                    continue
 
-                if best_name:
+                # ── Template match sukses → assign ke named hero ──
+                if best_name and final_score >= self.match_threshold:
+                    used_dots.add(dot_idx)
                     name = best_name
                     if name in self._tracked:
                         hero = self._tracked[name]
@@ -1489,8 +1497,72 @@ class MinimapHeroTracker:
                         self._tracked[name] = hero
                         self._roster_unassigned.discard(name)
                     matched_names.add(name)
+                else:
+                    # ── Template match GAGAL → tetap track sebagai unknown ──
+                    #     Dot YOLO ini valid — cuma identitasnya belum diketahui.
+                    #     Akan di-reassign via elimination/kalau nanti roster known.
+                    used_dots.add(dot_idx)
+                    if team == "hero":
+                        unassigned_team = [n for n in self._roster_unassigned
+                                           if self._roster.get(n) in ("blue", "red")]
+                        if len(unassigned_team) == 1:
+                            name = unassigned_team[0]
+                            self._roster_unassigned.discard(name)
+                            actual_team = self._roster.get(name, "blue")
+                        else:
+                            self._unknown_counter = getattr(self, "_unknown_counter", 0) + 1
+                            name = f"unknown_hero_{self._unknown_counter}"
+                            actual_team = "blue"  # best guess, may flip later
+                    else:
+                        unassigned_team = [n for n in self._roster_unassigned
+                                           if self._roster.get(n) == team]
+                        if len(unassigned_team) == 1:
+                            name = unassigned_team[0]
+                            self._roster_unassigned.discard(name)
+                        else:
+                            self._unknown_counter = getattr(self, "_unknown_counter", 0) + 1
+                            name = f"unknown_{team}_{self._unknown_counter}"
+                        actual_team = team
 
-        # ── 4. NN fallback untuk hero yang belum matched ──
+                    nx, ny = self._normalize(cx, cy)
+                    h = TrackedMinimapHero(name=name, team=actual_team,
+                        norm_x=nx, norm_y=ny,
+                        last_seen_frame=frame_idx, first_seen_frame=frame_idx,
+                        frames_alive=1, confidence=0.5, smooth_alpha=self.smooth_alpha)
+                    self._tracked[name] = h
+                    matched_names.add(name)
+
+        # ── 4. Sisa dots yg belum di-handle (roster belum set, dsb) → unknown ──
+        for i, (team, _jn, cx, cy, r) in enumerate(all_dots):
+            if i in used_dots:
+                continue
+            used_dots.add(i)
+            if team == "hero":
+                unassigned = [n for n in self._roster_unassigned
+                              if self._roster.get(n) in ("blue", "red")]
+                actual_team = "blue"
+            else:
+                unassigned = [n for n in self._roster_unassigned
+                              if self._roster.get(n) == team]
+                actual_team = team
+
+            if len(unassigned) == 1:
+                name = unassigned[0]
+                self._roster_unassigned.discard(name)
+                actual_team = self._roster.get(name, actual_team)
+            else:
+                self._unknown_counter = getattr(self, "_unknown_counter", 0) + 1
+                name = f"unknown_{actual_team}_{self._unknown_counter}"
+
+            nx, ny = self._normalize(cx, cy)
+            h = TrackedMinimapHero(name=name, team=actual_team,
+                norm_x=nx, norm_y=ny,
+                last_seen_frame=frame_idx, first_seen_frame=frame_idx,
+                frames_alive=1, confidence=0.5, smooth_alpha=self.smooth_alpha)
+            self._tracked[name] = h
+            matched_names.add(name)
+
+        # ── 5. NN fallback: unmatched tracked heroes → nearest unmatched dot ──
         unmatched_tracked = [
             h for h in self._tracked.values()
             if h.name and h.name not in matched_names and h.miss_count < self.max_miss_frames
@@ -1521,36 +1593,6 @@ class MinimapHeroTracker:
                     h.frames_alive += 1; h.miss_count = 0
                     h.confidence = min(1.0, h.frames_alive * 0.04 + 0.5)
 
-        # ── 5. Sisa dots: assign ke unknown (JANGAN tebak acak nama hero dari roster) ──
-        for team, _jn, cx, cy, r in all_dots:
-            if any(i in used_dots for i, (t, _jn2, cxc, cyc, rc) in enumerate(all_dots) if (cxc, cyc) == (cx, cy)):
-                continue
-            if matched_names and any(abs(cx - int(mh.norm_x*self._mm_w)) < NMS_DISTANCE_THRESHOLD
-                                     and abs(cy - int(mh.norm_y*self._mm_h)) < NMS_DISTANCE_THRESHOLD
-                                     for mn in matched_names for mh in [self._tracked.get(mn)] if mh):
-                continue
-            
-            # Roster elimination: jika hanya ada 1 hero di roster yang belum matched, assign ke hero tersebut
-            if team == "hero":
-                # YOLO team="hero" → coba cocokkan ke blue atau red roster
-                unassigned_team = [n for n in self._roster_unassigned
-                                   if self._roster.get(n) in ("blue", "red")]
-            else:
-                unassigned_team = [n for n in self._roster_unassigned if self._roster.get(n) == team]
-            if len(unassigned_team) == 1:
-                name = unassigned_team[0]
-                self._roster_unassigned.discard(name)
-            else:
-                self._unknown_counter = getattr(self, "_unknown_counter", 0) + 1
-                name = f"unknown_{team}_{self._unknown_counter}"
-            
-            nx, ny = self._normalize(cx, cy)
-            h = TrackedMinimapHero(name=name, team=team, norm_x=nx, norm_y=ny,
-                last_seen_frame=frame_idx, first_seen_frame=frame_idx,
-                frames_alive=1, confidence=0.5, smooth_alpha=self.smooth_alpha)
-            self._tracked[name] = h
-            matched_names.add(name)
-
         # ── 6. Coasting: gerakin hero yang gak terdeteksi sesuai velocity ──
         for h in self._tracked.values():
             if h.name and h.name not in matched_names:
@@ -1561,7 +1603,13 @@ class MinimapHeroTracker:
                 h.miss_count += 1
 
         # ── 7. Cleanup dead ──
-        dead = [n for n, h in self._tracked.items() if h.miss_count >= self.max_miss_frames]
+        #     Unknown → 8 miss (~0.5s), named hero → max_miss_frames (~2s via config)
+        dead = []
+        for n, h in self._tracked.items():
+            is_unknown = (not h.name) or h.name.startswith("unknown_")
+            threshold = self.max_miss_frames_unknown if is_unknown else self.max_miss_frames
+            if h.miss_count >= threshold:
+                dead.append(n)
         for n in dead:
             del self._tracked[n]
             if n in self._roster: self._roster_unassigned.add(n)

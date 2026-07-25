@@ -334,30 +334,21 @@ class DetectorManager:
                 status["gold"] = result.value
 
         # ── Blue Team Detection (scoreboard portraits) ──
-        # Scan every 3 seconds until all 5 heroes found
+        # Re-scan setiap 5 detik untuk koreksi kalau ada mismatched hero
         if not hasattr(self, '_blue_team_scanned'):
             self._blue_team_scanned = False
             self._blue_team_last_scan = 0.0
-            self._blue_team_heroes = []  # list of {"name": str, "slot": int, "confidence": float}
-            log.info("🔍 Blue team scanner initialized (scan every 3s video time)")
+            self._blue_team_heroes = []
+            self._blue_team_heroes_prev = None  # untuk deteksi perubahan roster
+            log.info("🔍 Blue team scanner initialized (scan every 5s)")
 
-        if not self._blue_team_scanned and video_time - self._blue_team_last_scan >= 3.0:
+        if video_time - self._blue_team_last_scan >= 5.0:
             self._blue_team_last_scan = video_time
-            log.info("🔍 Blue team scan at video_time=%.1fs (frame=%d)", video_time, int(video_time * 30))
-            # Run blue team detector on full frame
             blue_result = self.blue_team_detector.detect(frame)
             if blue_result and blue_result.value:
                 heroes = blue_result.value.get("heroes", [])
                 detected = [h for h in heroes if h.get("hero_name")]
-                log.info("  Blue team raw result: %d heroes total, %d matched",
-                         len(heroes), len(detected))
-                for h in heroes:
-                    if h.get("hero_name"):
-                        log.info("  ✅ Slot %d: %s (conf=%.2f)", h["slot"], h["hero_name"], h["confidence"])
-                    else:
-                        log.info("  ❌ Slot %d: NO MATCH (conf=%.2f)", h["slot"], h["confidence"])
                 for h in detected:
-                    # Merge with existing (keep highest confidence per slot)
                     existing = next((x for x in self._blue_team_heroes if x["slot"] == h["slot"]), None)
                     if not existing or h["confidence"] > existing["confidence"]:
                         if existing:
@@ -367,15 +358,20 @@ class DetectorManager:
                             "slot": h["slot"],
                             "confidence": h["confidence"],
                         })
-                log.info("Blue team scan result: %d/5 heroes found", len(self._blue_team_heroes))
                 if len(self._blue_team_heroes) >= 5:
-                    self._blue_team_scanned = True
-                    log.info("✅ Blue team complete: %s",
-                             ", ".join([f"{h['name']}(slot{h['slot']})" for h in self._blue_team_heroes]))
-            else:
-                log.warning("  Blue team detector returned no result (image size=%s)", frame.shape[:2] if frame is not None else "None")
+                    if not self._blue_team_scanned:
+                        self._blue_team_scanned = True
+                        log.info("✅ Blue team complete: %s",
+                                 ", ".join([f"{h['name']}(slot{h['slot']})" for h in self._blue_team_heroes]))
+                    else:
+                        # Cek apakah roster berubah
+                        prev = self._blue_team_heroes_prev
+                        curr = sorted([h["name"] for h in self._blue_team_heroes])
+                        if prev != curr:
+                            log.info("🔄 Blue team roster changed: %s", ", ".join(curr))
+                            self._minimap_roster_set = False  # trigger re-set roster di minimap tracker
+                self._blue_team_heroes_prev = sorted([h["name"] for h in self._blue_team_heroes])
 
-        # Add blue team heroes to status for overlay
         status["blue_team_heroes"] = self._blue_team_heroes
         status["blue_team_complete"] = self._blue_team_scanned
 
@@ -384,20 +380,15 @@ class DetectorManager:
             self._red_team_scanned = False
             self._red_team_last_scan = 0.0
             self._red_team_heroes = []
-            log.info("🔍 Red team scanner initialized")
+            self._red_team_heroes_prev = None
+            log.info("🔍 Red team scanner initialized (scan every 5s)")
 
-        if not self._red_team_scanned and video_time - self._red_team_last_scan >= 3.0:
+        if video_time - self._red_team_last_scan >= 5.0:
             self._red_team_last_scan = video_time
-            log.info("🔍 Red team scan at video_time=%.1fs", video_time)
             red_result = self.red_team_detector.detect(frame)
             if red_result and red_result.value:
                 heroes = red_result.value.get("heroes", [])
                 detected = [h for h in heroes if h.get("hero_name")]
-                for h in heroes:
-                    if h.get("hero_name"):
-                        log.info("  🟥 Slot %d: %s (conf=%.2f)", h["slot"], h["hero_name"], h["confidence"])
-                    else:
-                        log.info("  🟥 Slot %d: NO MATCH (conf=%.2f)", h["slot"], h["confidence"])
                 for h in detected:
                     existing = next((x for x in self._red_team_heroes if x["slot"] == h["slot"]), None)
                     if not existing or h["confidence"] > existing["confidence"]:
@@ -408,11 +399,18 @@ class DetectorManager:
                             "slot": h["slot"],
                             "confidence": h["confidence"],
                         })
-                log.info("Red team scan result: %d/5 heroes found", len(self._red_team_heroes))
                 if len(self._red_team_heroes) >= 5:
-                    self._red_team_scanned = True
-                    log.info("✅ Red team complete: %s",
-                             ", ".join([f"{h['name']}" for h in self._red_team_heroes]))
+                    if not self._red_team_scanned:
+                        self._red_team_scanned = True
+                        log.info("✅ Red team complete: %s",
+                                 ", ".join([f"{h['name']}" for h in self._red_team_heroes]))
+                    else:
+                        prev = self._red_team_heroes_prev
+                        curr = sorted([h["name"] for h in self._red_team_heroes])
+                        if prev != curr:
+                            log.info("🔄 Red team roster changed: %s", ", ".join(curr))
+                            self._minimap_roster_set = False
+                self._red_team_heroes_prev = sorted([h["name"] for h in self._red_team_heroes])
 
         status["red_team_heroes"] = self._red_team_heroes
         status["red_team_complete"] = self._red_team_scanned
@@ -823,24 +821,6 @@ def draw_minimap_hero_overlay(frame: np.ndarray, status: dict[str, Any]):
 
                     lines.append((text, conf_color))
 
-        # Jungle objectives
-        jungle_heroes = [e for e in mm_heroes if e["team"] == "jungle"]
-        if jungle_heroes:
-            lines.append((f"  [JUNGLE] {len(jungle_heroes)} visible", (100, 255, 100)))
-            for entry in jungle_heroes:
-                c_name = entry.get("name") or "jungle"
-                if c_name.startswith("jungle_"):
-                    c_name = "jungle"
-                gx, gy = entry.get("game_x"), entry.get("game_y")
-                region = entry.get("region") or ""
-                conf = entry.get("confidence", 0)
-                if gx is not None and gy is not None:
-                    text = f"  {c_name}: ({gx:.0f}, {gy:.0f})"
-                else:
-                    text = f"  {c_name}: ({entry['norm_x']:.2f}, {entry['norm_y']:.2f})"
-                if region:
-                    text += f" @{region}"
-                lines.append((text, (100, 255, 100)))
     else:
         lines.append(("  (waiting for detection)", (180, 180, 180)))
 
@@ -1082,6 +1062,7 @@ _HELP_LINES = [
     ("l / L", "Save locked / Auto-collect locked (stun/CC)"),
     ("t", "Toggle skill mode (CNN Model / CV Legacy)"),
     (", / .", "Match threshold -0.05 / +0.05"),
+    ("1", "Copy ALL hero portraits (scoreboard) → assets/heroes/"),
     ("- / =", "Slow down / Speed up (0.5× step)"),
     ("Drag handles", "Move / resize regions"),
 ]
@@ -1121,13 +1102,13 @@ def draw_help_overlay(frame: np.ndarray):
 class _LayoutEditor:
     """Interactive layout region editor — drag, resize, save."""
     def __init__(self):
-        self.selected: str | None = None      # region path, e.g. "hero_panel.skills.skill_1"
-        self.mode: str | int | None = None    # 'move' or corner index (0-3)
+        self.selected: str | None = None
+        self.mode: str | int | None = None
         self.orig_bbox: list[int] | None = None
-        self.offset: tuple[int, int] | None = None  # mouse offset inside bbox for move
+        self.offset: tuple[int, int] | None = None
         self.dirty: bool = False
-        self.paused: bool = False  # edit hanya saat paused
-        self.edit_mode: bool = False  # toggle dengan E
+        self.paused: bool = False
+        self.edit_mode: bool = False
 
     def get_region_data(self, path: str) -> dict | None:
         """Get region dict from cached layout by dot-path."""
@@ -1174,7 +1155,7 @@ def _make_mouse_cb(editor: _LayoutEditor, fw: int, fh: int, dw: int, dh: int):
 
         e = param  # _LayoutEditor instance
 
-        if not e.paused or not e.edit_mode:
+        if not e.edit_mode:
             return
 
         if event == cv2.EVENT_LBUTTONDOWN:
@@ -1277,8 +1258,8 @@ def _make_mouse_cb(editor: _LayoutEditor, fw: int, fh: int, dw: int, dh: int):
     return _cb
 
 
-def _save_layout(editor: _LayoutEditor):
-    """Save cached layout back to layout.yaml."""
+def _save_layout(editor: _LayoutEditor, template_src: str | None = None):
+    """Save layout.yaml. Jika template_src diberikan, copy juga ke template."""
     if not editor.dirty:
         print("ℹ️ No changes to save")
         return
@@ -1289,8 +1270,15 @@ def _save_layout(editor: _LayoutEditor):
         return
     with open(path, "w") as f:
         yaml.dump(data, f, default_flow_style=None, sort_keys=False, allow_unicode=True)
-    print(f"💾 Layout saved to {path}")
+    print(f"💾 Saved to {path}")
+
+    if template_src:
+        import shutil
+        shutil.copy2(path, template_src)
+        print(f"💾 Synced to {template_src}")
+
     editor.dirty = False
+
 
 
 # ── Skill Dataset Collection (dipanggil dari key binding) ─────────────
@@ -1358,6 +1346,7 @@ def _collect_skill_samples(frame: np.ndarray, detector: DetectorManager,
 
 def main():
     global _auto_collect_skills, _auto_collect_count, _auto_collect_locked, _locked_end_time, _last_skills
+    global _layout_skill_template
     ap = argparse.ArgumentParser()
     ap.add_argument("video", nargs="?")
     ap.add_argument("--overlay", action="store_true", default=True,
@@ -1428,48 +1417,25 @@ def main():
     
 
     # ── Layout: pilih 3 skill atau 4 skill ──
-
+    #     Copy dari template → layout.yaml setiap startup.
+    #     Saat SAVE (tekan S): layout.yaml → copy balik ke template sumber.
     layout_file = os.path.join(BASE, "vision", "layout.yaml")
+    import shutil
 
     try:
-
         inp = input("🎮 Layout skills [3/4] (default: 3): ").strip()
-
-        if inp == "4":
-
-            src = os.path.join(BASE, "vision", "layout_4_skill.yaml")
-
-            if os.path.exists(src):
-
-                import shutil
-
-                shutil.copy2(src, layout_file)
-
-                layout._LAYOUT_CACHE.clear()
-
-                print("   ✅ Layout: 4 skill (ultimate di skill_4)")
-
-            else:
-
-                print("   ⚠️  layout_4_skill.yaml tidak ditemukan, pakai 3 skill")
-
-        else:
-
-            src = os.path.join(BASE, "vision", "layout_3_skill.yaml")
-
-            if os.path.exists(src):
-
-                import shutil
-
-                shutil.copy2(src, layout_file)
-
-                layout._LAYOUT_CACHE.clear()
-
-                print("   ✅ Layout: 3 skill (default)")
-
     except (EOFError, KeyboardInterrupt):
+        inp = ""
+    use_skill = inp if inp in ("3", "4") else "3"
+    _layout_skill_template = os.path.join(BASE, "vision", f"layout_{use_skill}_skill.yaml")
 
-        print("   ✅ Layout: 3 skill (default)")
+    if os.path.exists(_layout_skill_template):
+        shutil.copy2(_layout_skill_template, layout_file)
+        layout._LAYOUT_CACHE.clear()
+        print(f"   ✅ Layout: {use_skill} skill")
+    else:
+        print(f"   ⚠️  Template layout_{use_skill}_skill.yaml tidak ditemukan")
+        _layout_skill_template = None
 
     
 
@@ -1850,7 +1816,7 @@ def main():
             _locked_end_time = video_time + 1.0
             print(f"🔒 Auto-collect locked: ON (until t={video_time+1.0:.1f}s)")
         if k == ord("s"):
-            _save_layout(layout_editor)
+            _save_layout(layout_editor, _layout_skill_template)
         if k == ord("S"):  # Shift+S = screenshot
             ts = cv2.getTickCount()
             path = os.path.join(BASE, f"debug_frame_{ts}.png")
@@ -1868,10 +1834,16 @@ def main():
             if not layout_edit_mode:
                 layout_editor.selected = None
                 layout_editor.mode = None
-                print("Layout editor: OFF")
+                cv2.resizeWindow("MLBB Debug", dw, dh)
+                print("Layout editor: OFF — window restored")
             else:
-                print("Layout editor: ON — pause video, lalu klik region")
-            print(f"Layout editor: {'ON' if layout_edit_mode else 'OFF'}")
+                fw = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                fh = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                cv2.resizeWindow("MLBB Debug", fw, fh)
+                cv2.setMouseCallback("MLBB Debug",
+                    _make_mouse_cb(layout_editor, fw, fh, fw, fh),
+                    layout_editor)
+                print(f"Layout editor: ON — window → {fw}×{fh} (original)")
         if k == ord("h"):
             show_help ^= True
             print(f"Help: {'ON' if show_help else 'OFF'}")
@@ -1891,6 +1863,43 @@ def main():
             t = detector_mgr.minimap_hero_tracker.match_threshold
             detector_mgr.minimap_hero_tracker.match_threshold = min(0.95, t + 0.05)
             print(f"🔼 Match threshold: {t:.2f} → {detector_mgr.minimap_hero_tracker.match_threshold:.2f}")
+        if k == ord("1"):
+            # Copy ALL hero portraits from scoreboard (blue + red team) to assets/heroes/
+            blue_heroes = getattr(detector_mgr, '_blue_team_heroes', []) or []
+            red_heroes = getattr(detector_mgr, '_red_team_heroes', []) or []
+            saved = 0
+            skipped = []
+
+            for team_key, heroes_list in [("detectors.blue_team", blue_heroes), ("detectors.red_team", red_heroes)]:
+                for hero in heroes_list:
+                    slot = hero.get("slot")
+                    name = hero.get("name")
+                    if not name or not slot:
+                        continue
+                    # Crop portrait dari scoreboard region
+                    pt_key = f"portrait_hero_{slot}"
+                    portrait_img = crop_region(fr, *team_key.split("."), pt_key)
+                    if portrait_img is None or portrait_img.size == 0:
+                        skipped.append(f"{name} (no crop)")
+                        continue
+                    gray_mean = cv2.cvtColor(portrait_img, cv2.COLOR_BGR2GRAY).mean()
+                    if gray_mean < 40:
+                        skipped.append(f"{name} (too dark)")
+                        continue
+                    hero_path = os.path.join(BASE, "assets", "heroes", f"{name}.png")
+                    cv2.imwrite(hero_path, portrait_img)
+                    saved += 1
+                    print(f"📸 [{team_key}] slot {slot} → {name}.png "
+                          f"({portrait_img.shape[1]}×{portrait_img.shape[0]})")
+
+            if skipped:
+                print(f"⚠️  Skipped: {', '.join(skipped)}")
+            if saved > 0:
+                print(f"✅ Copied {saved} hero portraits to assets/heroes/")
+                # Reset minimap tracker biar reload template baru
+                detector_mgr.minimap_hero_tracker.reset()
+                detector_mgr._minimap_roster_set = False
+                print("🔄 Minimap tracker reset — templates will reload on next roster set")
         if k == ord("z"):
             # Debug: print crop results for all regions
             for path, reg in layout.enumerate_regions():
